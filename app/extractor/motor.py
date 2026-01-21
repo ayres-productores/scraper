@@ -327,6 +327,9 @@ class MotorExtractorWeb:
                             )
                             continue
 
+                        # Contador de PDFs para ESTE correo especifico (se resetea por correo)
+                        pdfs_este_correo = 0
+
                         # Procesar adjuntos
                         for parte in msg.walk():
                             if self.detener_solicitado:
@@ -396,18 +399,20 @@ class MotorExtractorWeb:
 
                                 pdfs_encontrados += 1
                                 pdfs_carpeta += 1
+                                pdfs_este_correo += 1
                                 nombre_cia = compania.nombre if compania else 'Desconocida'
                                 self.registrar(f"Descargado: {nuevo_nombre} [{nombre_cia}]")
 
                         # Registrar correo como procesado
-                        tiene_pdfs = pdfs_carpeta > 0
+                        # Usamos pdfs_este_correo (no pdfs_carpeta) para saber si ESTE correo tenia PDFs
+                        tiene_pdfs = pdfs_este_correo > 0
                         if tiene_pdfs:
                             correos_con_pdf_carpeta += 1
                         CorreoProcesado.registrar_procesado(
                             cuenta.id, message_id, carpeta, fecha_correo,
                             remitente[:255] if remitente else None,
                             asunto[:500] if asunto else None,
-                            tiene_pdfs, pdfs_carpeta
+                            tiene_pdfs, pdfs_este_correo
                         )
 
                     # Actualizar historial de la carpeta al terminar
