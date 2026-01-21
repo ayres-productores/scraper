@@ -852,6 +852,138 @@ class AlertaVencimiento(db.Model):
         return f'<AlertaVencimiento {self.id} - {self.tipo} - {self.estado}>'
 
 
+# ============================================================================
+# MODELOS DE MEMORIA DE ESCANEO - Evitar búsquedas repetidas
+# ============================================================================
+
+class CorreoProcesado(db.Model):
+    """Modelo para registrar correos ya procesados y evitar reprocesamiento."""
+
+    __tablename__ = 'correos_procesados'
+
+    id = db.Column(db.Integer, primary_key=True)
+    cuenta_gmail_id = db.Column(db.Integer, db.ForeignKey('cuentas_gmail.id'), nullable=False)
+    message_id = db.Column(db.String(255), nullable=False, index=True)  # Message-ID del correo
+    carpeta = db.Column(db.String(100), nullable=False)
+    fecha_correo = db.Column(db.DateTime, nullable=True)
+    remitente = db.Column(db.String(255), nullable=True)
+    asunto = db.Column(db.String(500), nullable=True)
+    tiene_pdfs = db.Column(db.Boolean, default=False)
+    pdfs_descargados = db.Column(db.Integer, default=0)
+    fecha_procesado = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Indice compuesto para búsquedas rápidas
+    __table_args__ = (
+        db.UniqueConstraint('cuenta_gmail_id', 'message_id', 'carpeta', name='uq_correo_procesado'),
+        db.Index('ix_correo_cuenta_carpeta', 'cuenta_gmail_id', 'carpeta'),
+    )
+
+    # Relación
+    cuenta = db.relationship('CuentaGmail', backref=db.backref('correos_procesados', lazy='dynamic'))
+
+    @staticmethod
+    def ya_procesado(cuenta_gmail_id, message_id, carpeta):
+        """Verifica si un correo ya fue procesado."""
+        return CorreoProcesado.query.filter_by(
+            cuenta_gmail_id=cuenta_gmail_id,
+            message_id=message_id,
+            carpeta=carpeta
+        ).first() is not None
+
+    @staticmethod
+    def registrar_procesado(cuenta_gmail_id, message_id, carpeta, fecha_correo=None,
+                           remitente=None, asunto=None, tiene_pdfs=False, pdfs_descargados=0):
+        """Registra un correo como procesado."""
+        registro = CorreoProcesado(
+            cuenta_gmail_id=cuenta_gmail_id,
+            message_id=message_id,
+            carpeta=carpeta,
+            fecha_correo=fecha_correo,
+            remitente=remitente,
+            asunto=asunto,
+            tiene_pdfs=tiene_pdfs,
+            pdfs_descargados=pdfs_descargados
+        )
+        db.session.add(registro)
+        return registro
+
+    def __repr__(self):
+        return f'<CorreoProcesado {self.message_id[:30]}...>'
+
+
+class HistorialEscaneoCarpeta(db.Model):
+    """Modelo para registrar última fecha escaneada por cuenta y carpeta."""
+
+    __tablename__ = 'historial_escaneo_carpeta'
+
+    id = db.Column(db.Integer, primary_key=True)
+    cuenta_gmail_id = db.Column(db.Integer, db.ForeignKey('cuentas_gmail.id'), nullable=False)
+    carpeta = db.Column(db.String(100), nullable=False)
+    ultima_fecha_escaneada = db.Column(db.DateTime, nullable=True)  # Fecha del correo más reciente procesado
+    ultimo_escaneo = db.Column(db.DateTime, default=datetime.utcnow)  # Cuándo se hizo el escaneo
+    correos_totales = db.Column(db.Integer, default=0)
+    correos_con_pdf = db.Column(db.Integer, default=0)
+    pdfs_descargados = db.Column(db.Integer, default=0)
+
+    # Índice compuesto
+    __table_args__ = (
+        db.UniqueConstraint('cuenta_gmail_id', 'carpeta', name='uq_historial_cuenta_carpeta'),
+    )
+
+    # Relación
+    cuenta = db.relationship('CuentaGmail', backref=db.backref('historial_carpetas', lazy='dynamic'))
+
+    @staticmethod
+    def obtener_ultima_fecha(cuenta_gmail_id, carpeta):
+        """Obtiene la última fecha escaneada para una cuenta y carpeta."""
+        historial = HistorialEscaneoCarpeta.query.filter_by(
+            cuenta_gmail_id=cuenta_gmail_id,
+            carpeta=carpeta
+        ).first()
+        return historial.ultima_fecha_escaneada if historial else None
+
+    @staticmethod
+    def actualizar_historial(cuenta_gmail_id, carpeta, ultima_fecha, correos_totales=0,
+                            correos_con_pdf=0, pdfs_descargados=0):
+        """Actualiza o crea el historial de escaneo para una carpeta."""
+        historial = HistorialEscaneoCarpeta.query.filter_by(
+            cuenta_gmail_id=cuenta_gmail_id,
+            carpeta=carpeta
+        ).first()
+
+        if historial:
+            # Solo actualizar si la nueva fecha es más reciente
+            if ultima_fecha and (not historial.ultima_fecha_escaneada or
+                                ultima_fecha > historial.ultima_fecha_escaneada):
+                historial.ultima_fecha_escaneada = ultima_fecha
+            historial.ultimo_escaneo = datetime.utcnow()
+            historial.correos_totales += correos_totales
+            historial.correos_con_pdf += correos_con_pdf
+            historial.pdfs_descargados += pdfs_descargados
+        else:
+            historial = HistorialEscaneoCarpeta(
+                cuenta_gmail_id=cuenta_gmail_id,
+                carpeta=carpeta,
+                ultima_fecha_escaneada=ultima_fecha,
+                correos_totales=correos_totales,
+                correos_con_pdf=correos_con_pdf,
+                pdfs_descargados=pdfs_descargados
+            )
+            db.session.add(historial)
+
+        return historial
+
+    @staticmethod
+    def obtener_resumen_cuenta(cuenta_gmail_id):
+        """Obtiene un resumen de todas las carpetas escaneadas de una cuenta."""
+        return HistorialEscaneoCarpeta.query.filter_by(
+            cuenta_gmail_id=cuenta_gmail_id
+        ).all()
+
+    def __repr__(self):
+        return f'<HistorialEscaneoCarpeta {self.carpeta} - {self.ultima_fecha_escaneada}>'
+
+
 class Siniestro(db.Model):
     """Modelo para gestión de siniestros."""
 

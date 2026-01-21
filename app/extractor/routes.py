@@ -9,7 +9,7 @@ from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, TextAreaField, DateField, SubmitField
 from wtforms.validators import DataRequired, Email
 from app import db
-from app.models import CuentaGmail, Escaneo, LogActividad
+from app.models import CuentaGmail, Escaneo, LogActividad, HistorialEscaneoCarpeta, CorreoProcesado
 from app.extractor.motor import (MotorExtractorWeb, crear_motor, obtener_motor,
                                   eliminar_motor, motores_activos)
 from datetime import datetime, timedelta
@@ -262,11 +262,15 @@ def iniciar_escaneo():
     # Crear y ejecutar motor
     motor = crear_motor(escaneo.id, current_app._get_current_object())
 
+    # Opcion para forzar escaneo completo (ignorar memoria)
+    forzar_escaneo = request.form.get('forzar_escaneo') == 'on'
+
     config = {
         'palabras_clave': palabras_clave,
         'carpetas': carpetas,
         'fecha_desde': fecha_desde,
-        'fecha_hasta': fecha_hasta
+        'fecha_hasta': fecha_hasta,
+        'forzar_escaneo': forzar_escaneo
     }
 
     motor.ejecutar_escaneo_multi(cuentas, config, directorio_usuario)
@@ -425,3 +429,85 @@ def historial():
     ).all()
 
     return render_template('extractor/historial.html', escaneos=escaneos)
+
+
+@extractor_bp.route('/memoria')
+@login_required
+def memoria_escaneo():
+    """Muestra estadísticas de la memoria de escaneo por cuenta."""
+    cuentas = current_user.cuentas_gmail.filter_by(activa=True).all()
+
+    estadisticas = []
+    for cuenta in cuentas:
+        # Obtener historial de carpetas
+        historial_carpetas = HistorialEscaneoCarpeta.query.filter_by(
+            cuenta_gmail_id=cuenta.id
+        ).all()
+
+        # Contar correos procesados
+        total_correos = CorreoProcesado.query.filter_by(
+            cuenta_gmail_id=cuenta.id
+        ).count()
+
+        correos_con_pdf = CorreoProcesado.query.filter_by(
+            cuenta_gmail_id=cuenta.id,
+            tiene_pdfs=True
+        ).count()
+
+        estadisticas.append({
+            'cuenta': cuenta,
+            'historial_carpetas': historial_carpetas,
+            'total_correos_procesados': total_correos,
+            'correos_con_pdf': correos_con_pdf
+        })
+
+    return render_template('extractor/memoria.html', estadisticas=estadisticas)
+
+
+@extractor_bp.route('/memoria/limpiar/<int:cuenta_id>', methods=['POST'])
+@login_required
+def limpiar_memoria(cuenta_id):
+    """Limpia la memoria de escaneo de una cuenta específica."""
+    cuenta = CuentaGmail.query.filter_by(
+        id=cuenta_id,
+        usuario_id=current_user.id
+    ).first_or_404()
+
+    # Eliminar correos procesados
+    CorreoProcesado.query.filter_by(cuenta_gmail_id=cuenta_id).delete()
+
+    # Eliminar historial de carpetas
+    HistorialEscaneoCarpeta.query.filter_by(cuenta_gmail_id=cuenta_id).delete()
+
+    db.session.commit()
+
+    LogActividad.registrar(
+        current_user.id, 'memoria_limpiada',
+        f'Memoria de escaneo limpiada para: {cuenta.correo_gmail}',
+        request
+    )
+
+    flash(f'Memoria de escaneo limpiada para {cuenta.correo_gmail}. El próximo escaneo revisará todos los correos.', 'success')
+    return redirect(url_for('extractor.memoria_escaneo'))
+
+
+@extractor_bp.route('/memoria/limpiar-todo', methods=['POST'])
+@login_required
+def limpiar_toda_memoria():
+    """Limpia toda la memoria de escaneo del usuario."""
+    cuentas = current_user.cuentas_gmail.all()
+
+    for cuenta in cuentas:
+        CorreoProcesado.query.filter_by(cuenta_gmail_id=cuenta.id).delete()
+        HistorialEscaneoCarpeta.query.filter_by(cuenta_gmail_id=cuenta.id).delete()
+
+    db.session.commit()
+
+    LogActividad.registrar(
+        current_user.id, 'memoria_total_limpiada',
+        'Toda la memoria de escaneo fue limpiada',
+        request
+    )
+
+    flash('Toda la memoria de escaneo fue limpiada. Los próximos escaneos revisarán todos los correos.', 'success')
+    return redirect(url_for('extractor.memoria_escaneo'))

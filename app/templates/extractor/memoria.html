@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+
+{% block title %}Memoria de Escaneo - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <a href="{{ url_for('extractor.index') }}" class="btn btn-sm btn-outline">&larr; Volver al Extractor</a>
+        <h1>Memoria de Escaneo</h1>
+        <p class="text-muted">El sistema recuerda que correos ya fueron revisados para evitar busquedas repetidas</p>
+    </div>
+    <div>
+        <form method="POST" action="{{ url_for('extractor.limpiar_toda_memoria') }}"
+              onsubmit="return confirm('Esto eliminara TODA la memoria de escaneo. El proximo escaneo revisara todos los correos desde cero. Continuar?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-danger">Limpiar Toda la Memoria</button>
+        </form>
+    </div>
+</div>
+
+{% if estadisticas %}
+<div class="cards-grid">
+    {% for stat in estadisticas %}
+    <div class="card">
+        <div class="card-header">
+            <h2>{{ stat.cuenta.correo_gmail }}</h2>
+            <form method="POST" action="{{ url_for('extractor.limpiar_memoria', cuenta_id=stat.cuenta.id) }}"
+                  onsubmit="return confirm('Limpiar memoria de esta cuenta?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-sm btn-outline-danger">Limpiar</button>
+            </form>
+        </div>
+        <div class="card-body">
+            <!-- Estadisticas generales -->
+            <div class="stats-row">
+                <div class="stat-item">
+                    <div class="stat-value">{{ stat.total_correos_procesados }}</div>
+                    <div class="stat-label">Correos Revisados</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value">{{ stat.correos_con_pdf }}</div>
+                    <div class="stat-label">Con PDFs</div>
+                </div>
+            </div>
+
+            <!-- Historial por carpeta -->
+            {% if stat.historial_carpetas %}
+            <h3 class="mt-3">Carpetas Escaneadas</h3>
+            <table class="table table-sm">
+                <thead>
+                    <tr>
+                        <th>Carpeta</th>
+                        <th>Ultimo Correo</th>
+                        <th>Ultimo Escaneo</th>
+                        <th>PDFs</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for hist in stat.historial_carpetas %}
+                    <tr>
+                        <td><code>{{ hist.carpeta }}</code></td>
+                        <td>
+                            {% if hist.ultima_fecha_escaneada %}
+                            {{ hist.ultima_fecha_escaneada.strftime('%d/%m/%Y %H:%M') }}
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
+                        <td>{{ hist.ultimo_escaneo.strftime('%d/%m/%Y %H:%M') }}</td>
+                        <td>{{ hist.pdfs_descargados }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="text-muted mt-3">No hay historial de escaneo para esta cuenta.</p>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="card">
+    <div class="card-body">
+        <div class="empty-state">
+            <p>No hay cuentas de Gmail configuradas.</p>
+            <a href="{{ url_for('extractor.index') }}" class="btn btn-primary">Configurar Cuentas</a>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="card mt-4">
+    <div class="card-header">
+        <h2>Como Funciona</h2>
+    </div>
+    <div class="card-body">
+        <div class="info-grid">
+            <div class="info-item">
+                <h4>1. Registro de Correos</h4>
+                <p>Cada correo revisado se guarda por su Message-ID unico. Si el correo ya fue procesado, se salta automaticamente.</p>
+            </div>
+            <div class="info-item">
+                <h4>2. Fechas por Carpeta</h4>
+                <p>Se guarda la fecha del correo mas reciente de cada carpeta. Los proximos escaneos solo buscan correos mas nuevos.</p>
+            </div>
+            <div class="info-item">
+                <h4>3. Escaneo Forzado</h4>
+                <p>Puedes marcar "Forzar escaneo completo" al iniciar para ignorar la memoria y revisar todo desde cero.</p>
+            </div>
+            <div class="info-item">
+                <h4>4. Limpiar Memoria</h4>
+                <p>Si necesitas re-escanear una cuenta, puedes limpiar su memoria. El proximo escaneo revisara todos los correos.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    gap: 1.5rem;
+}
+
+.stats-row {
+    display: flex;
+    gap: 2rem;
+    padding: 1rem;
+    background: var(--light);
+    border-radius: var(--radius);
+}
+
+.stat-item {
+    text-align: center;
+}
+
+.stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.stat-label {
+    font-size: 0.85rem;
+    color: var(--gray);
+}
+
+.table-sm th, .table-sm td {
+    padding: 0.5rem;
+    font-size: 0.85rem;
+}
+
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 1.5rem;
+}
+
+.info-item h4 {
+    margin-bottom: 0.5rem;
+    color: var(--primary);
+}
+
+.info-item p {
+    margin: 0;
+    color: var(--gray);
+    font-size: 0.9rem;
+}
+
+.btn-outline-danger {
+    color: var(--danger);
+    border-color: var(--danger);
+    background: transparent;
+}
+
+.btn-outline-danger:hover {
+    background: var(--danger);
+    color: white;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 2rem;
+}
+</style>
+{% endblock %}

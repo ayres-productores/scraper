@@ -189,10 +189,21 @@
                     </div>
                 </div>
 
+                <div class="form-group">
+                    <label class="checkbox-inline">
+                        <input type="checkbox" name="forzar_escaneo" class="checkbox">
+                        <span>Forzar escaneo completo</span>
+                    </label>
+                    <small class="form-text">Ignora la memoria y revisa todos los correos, incluso los ya procesados</small>
+                </div>
+
                 <button type="submit" class="btn btn-primary btn-block" id="btn-iniciar">
                     &#128269; Iniciar Escaneo
                 </button>
             </form>
+            <div class="memoria-link">
+                <a href="{{ url_for('extractor.memoria_escaneo') }}">&#128202; Ver memoria de escaneo</a>
+            </div>
             {% else %}
             <div class="empty-state">
                 <p>Agrega al menos una cuenta de Gmail para iniciar un escaneo.</p>
@@ -434,6 +445,33 @@
 @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.6; }
+}
+
+.checkbox-inline {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+}
+
+.checkbox-inline span {
+    font-weight: 500;
+}
+
+.memoria-link {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--gray-light);
+    text-align: center;
+}
+
+.memoria-link a {
+    color: var(--gray);
+    font-size: 0.9rem;
+}
+
+.memoria-link a:hover {
+    color: var(--primary);
 }
 
 </style>

@@ -190,12 +190,15 @@ class MotorExtractorWeb:
     def _escanear_cuenta(self, cuenta, config, directorio_salida, escaneo):
         """Escanea una cuenta individual de Gmail."""
         from app import db
-        from app.models import ArchivoDescargado, Compania
+        from app.models import ArchivoDescargado, Compania, CorreoProcesado, HistorialEscaneoCarpeta
 
         carpetas = config.get('carpetas', ['INBOX'])
         palabras_clave = config.get('palabras_clave', [])
         fecha_desde = config.get('fecha_desde')
         fecha_hasta = config.get('fecha_hasta')
+
+        # Opcion para forzar re-escaneo completo (ignorar memoria)
+        forzar_escaneo = config.get('forzar_escaneo', False)
 
         pdfs_encontrados = 0
         correos_escaneados = 0
@@ -226,8 +229,17 @@ class MotorExtractorWeb:
 
                     # Construir criterios de búsqueda
                     criterios = []
-                    if fecha_desde:
-                        criterios.append(f'SINCE {fecha_desde.strftime("%d-%b-%Y")}')
+
+                    # Si no se fuerza escaneo, usar la última fecha escaneada
+                    fecha_busqueda = fecha_desde
+                    if not forzar_escaneo and not fecha_desde:
+                        ultima_fecha = HistorialEscaneoCarpeta.obtener_ultima_fecha(cuenta.id, carpeta)
+                        if ultima_fecha:
+                            fecha_busqueda = ultima_fecha.date()
+                            self.registrar(f"Buscando solo correos desde: {fecha_busqueda.strftime('%d/%m/%Y')}")
+
+                    if fecha_busqueda:
+                        criterios.append(f'SINCE {fecha_busqueda.strftime("%d-%b-%Y")}')
                     if fecha_hasta:
                         criterios.append(f'BEFORE {fecha_hasta.strftime("%d-%b-%Y")}')
 
@@ -241,6 +253,13 @@ class MotorExtractorWeb:
                     total_en_carpeta = len(ids_mensajes)
                     self.total_correos_carpeta = total_en_carpeta
                     self.registrar(f"Encontrados {total_en_carpeta} correos en carpeta")
+
+                    # Contadores para esta carpeta
+                    correos_nuevos = 0
+                    correos_saltados = 0
+                    correos_con_pdf_carpeta = 0
+                    pdfs_carpeta = 0
+                    fecha_mas_reciente = None
 
                     for idx, id_msg in enumerate(ids_mensajes, 1):
                         # Verificar pausa
@@ -266,6 +285,17 @@ class MotorExtractorWeb:
                         correo_crudo = datos_msg[0][1]
                         msg = email.message_from_bytes(correo_crudo)
 
+                        # Obtener Message-ID para verificar si ya fue procesado
+                        message_id = msg.get('Message-ID', '') or msg.get('Message-Id', '')
+                        if not message_id:
+                            # Generar un ID basado en otros campos si no hay Message-ID
+                            message_id = hashlib.md5(correo_crudo[:1000]).hexdigest()
+
+                        # Verificar si este correo ya fue procesado
+                        if not forzar_escaneo and CorreoProcesado.ya_procesado(cuenta.id, message_id, carpeta):
+                            correos_saltados += 1
+                            continue
+
                         asunto = self.decodificar_cabecera(msg['Subject'])
                         remitente = self.decodificar_cabecera(msg['From'])
                         fecha_str = msg['Date']
@@ -282,8 +312,19 @@ class MotorExtractorWeb:
                         except:
                             fecha_correo = datetime.now()
 
+                        # Actualizar fecha más reciente de esta carpeta
+                        if fecha_mas_reciente is None or fecha_correo > fecha_mas_reciente:
+                            fecha_mas_reciente = fecha_correo
+
+                        correos_nuevos += 1
+
                         # Verificar filtro
                         if not self.coincide_palabras_clave(asunto, remitente, palabras_clave):
+                            # Registrar como procesado aunque no coincida con filtro
+                            CorreoProcesado.registrar_procesado(
+                                cuenta.id, message_id, carpeta, fecha_correo,
+                                remitente[:255], asunto[:500], False, 0
+                            )
                             continue
 
                         # Procesar adjuntos
@@ -354,8 +395,31 @@ class MotorExtractorWeb:
                                 db.session.add(archivo)
 
                                 pdfs_encontrados += 1
+                                pdfs_carpeta += 1
                                 nombre_cia = compania.nombre if compania else 'Desconocida'
                                 self.registrar(f"Descargado: {nuevo_nombre} [{nombre_cia}]")
+
+                        # Registrar correo como procesado
+                        tiene_pdfs = pdfs_carpeta > 0
+                        if tiene_pdfs:
+                            correos_con_pdf_carpeta += 1
+                        CorreoProcesado.registrar_procesado(
+                            cuenta.id, message_id, carpeta, fecha_correo,
+                            remitente[:255] if remitente else None,
+                            asunto[:500] if asunto else None,
+                            tiene_pdfs, pdfs_carpeta
+                        )
+
+                    # Actualizar historial de la carpeta al terminar
+                    if correos_nuevos > 0 or correos_saltados > 0:
+                        HistorialEscaneoCarpeta.actualizar_historial(
+                            cuenta.id, carpeta, fecha_mas_reciente,
+                            correos_nuevos, correos_con_pdf_carpeta, pdfs_carpeta
+                        )
+                        db.session.commit()
+
+                    if correos_saltados > 0:
+                        self.registrar(f"Saltados {correos_saltados} correos ya procesados")
 
                 except Exception as e:
                     self.registrar(f"Error en {carpeta}: {e}")
