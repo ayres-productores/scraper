@@ -857,7 +857,13 @@ class AlertaVencimiento(db.Model):
 # ============================================================================
 
 class CorreoProcesado(db.Model):
-    """Modelo para registrar correos ya procesados y evitar reprocesamiento."""
+    """
+    Modelo para registrar correos ya procesados y evitar reprocesamiento.
+
+    CRITERIO PRINCIPAL: Cada correo se identifica por su Message-ID unico.
+    Si un correo ya fue procesado (existe en esta tabla), se salta.
+    Este es el UNICO criterio para determinar si un correo ya fue revisado.
+    """
 
     __tablename__ = 'correos_procesados'
 
@@ -912,7 +918,13 @@ class CorreoProcesado(db.Model):
 
 
 class HistorialEscaneoCarpeta(db.Model):
-    """Modelo para registrar última fecha escaneada por cuenta y carpeta."""
+    """
+    Modelo para registrar estadisticas de escaneo por cuenta y carpeta.
+
+    IMPORTANTE: Este modelo es SOLO INFORMATIVO/ESTADISTICO.
+    NO se usa para filtrar correos (eso dejaria huecos en las fechas).
+    El unico criterio para saltar correos es el Message-ID en CorreoProcesado.
+    """
 
     __tablename__ = 'historial_escaneo_carpeta'
 

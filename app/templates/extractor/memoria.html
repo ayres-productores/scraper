@@ -97,20 +97,20 @@
     <div class="card-body">
         <div class="info-grid">
             <div class="info-item">
-                <h4>1. Registro de Correos</h4>
-                <p>Cada correo revisado se guarda por su Message-ID unico. Si el correo ya fue procesado, se salta automaticamente.</p>
+                <h4>1. Identificacion por Message-ID</h4>
+                <p>Cada correo tiene un identificador unico (Message-ID). El sistema guarda los IDs de correos ya revisados.</p>
             </div>
             <div class="info-item">
-                <h4>2. Fechas por Carpeta</h4>
-                <p>Se guarda la fecha del correo mas reciente de cada carpeta. Los proximos escaneos solo buscan correos mas nuevos.</p>
+                <h4>2. Criterio de Salto</h4>
+                <p>Al escanear, si un correo ya tiene su Message-ID registrado, se salta automaticamente. Las fechas NO se usan para filtrar.</p>
             </div>
             <div class="info-item">
-                <h4>3. Escaneo Forzado</h4>
-                <p>Puedes marcar "Forzar escaneo completo" al iniciar para ignorar la memoria y revisar todo desde cero.</p>
+                <h4>3. Sin Huecos</h4>
+                <p>Aunque escanees diferentes rangos de fechas, el sistema revisa cada correo individualmente. No quedan fechas sin explorar.</p>
             </div>
             <div class="info-item">
-                <h4>4. Limpiar Memoria</h4>
-                <p>Si necesitas re-escanear una cuenta, puedes limpiar su memoria. El proximo escaneo revisara todos los correos.</p>
+                <h4>4. Forzar Re-escaneo</h4>
+                <p>Usa "Forzar escaneo completo" o "Limpiar memoria" si necesitas volver a revisar correos ya procesados.</p>
             </div>
         </div>
     </div>

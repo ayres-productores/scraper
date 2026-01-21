@@ -227,23 +227,19 @@ class MotorExtractorWeb:
 
                     self.registrar(f"Escaneando: {carpeta}")
 
-                    # Construir criterios de búsqueda
+                    # Construir criterios de búsqueda (solo usa fechas del usuario, NO de memoria)
                     criterios = []
 
-                    # Si no se fuerza escaneo, usar la última fecha escaneada
-                    fecha_busqueda = fecha_desde
-                    if not forzar_escaneo and not fecha_desde:
-                        ultima_fecha = HistorialEscaneoCarpeta.obtener_ultima_fecha(cuenta.id, carpeta)
-                        if ultima_fecha:
-                            fecha_busqueda = ultima_fecha.date()
-                            self.registrar(f"Buscando solo correos desde: {fecha_busqueda.strftime('%d/%m/%Y')}")
-
-                    if fecha_busqueda:
-                        criterios.append(f'SINCE {fecha_busqueda.strftime("%d-%b-%Y")}')
+                    # Las fechas son las que el usuario selecciono, no las de memoria
+                    if fecha_desde:
+                        criterios.append(f'SINCE {fecha_desde.strftime("%d-%b-%Y")}')
                     if fecha_hasta:
                         criterios.append(f'BEFORE {fecha_hasta.strftime("%d-%b-%Y")}')
 
                     cadena_busqueda = ' '.join(criterios) if criterios else 'ALL'
+
+                    # La memoria se usa SOLO para saltar correos individuales por Message-ID
+                    # NO para filtrar por fechas (eso podria dejar huecos)
 
                     resultado, mensajes = mail.search(None, cadena_busqueda)
                     if resultado != 'OK':
@@ -288,10 +284,14 @@ class MotorExtractorWeb:
                         # Obtener Message-ID para verificar si ya fue procesado
                         message_id = msg.get('Message-ID', '') or msg.get('Message-Id', '')
                         if not message_id:
-                            # Generar un ID basado en otros campos si no hay Message-ID
+                            # Generar un ID unico basado en contenido si no hay Message-ID
                             message_id = hashlib.md5(correo_crudo[:1000]).hexdigest()
 
-                        # Verificar si este correo ya fue procesado
+                        # ============================================================
+                        # CRITERIO UNICO DE SALTO: Message-ID ya procesado
+                        # Este es el UNICO criterio para saltar un correo.
+                        # NO usamos fechas para filtrar (eso dejaria huecos).
+                        # ============================================================
                         if not forzar_escaneo and CorreoProcesado.ya_procesado(cuenta.id, message_id, carpeta):
                             correos_saltados += 1
                             continue
