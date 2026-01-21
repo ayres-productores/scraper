@@ -100,23 +100,35 @@ class MotorExtractorWeb:
 
     def ejecutar_escaneo_multi(self, cuentas, config, directorio_salida):
         """Ejecuta el escaneo de múltiples cuentas en un hilo separado."""
+        # Extraer solo los IDs para evitar problemas de sesion SQLAlchemy
+        # Los objetos se re-consultan dentro del hilo con el contexto correcto
+        cuenta_ids = [c.id for c in cuentas]
         thread = Thread(target=self._escanear_multi_con_contexto,
-                       args=(cuentas, config, directorio_salida))
+                       args=(cuenta_ids, config, directorio_salida))
         thread.daemon = True
         thread.start()
 
-    def _escanear_multi_con_contexto(self, cuentas, config, directorio_salida):
+    def _escanear_multi_con_contexto(self, cuenta_ids, config, directorio_salida):
         """Ejecuta el escaneo multi-cuenta dentro del contexto de la aplicación."""
         with self.app.app_context():
-            self._escanear_multi(cuentas, config, directorio_salida)
+            self._escanear_multi(cuenta_ids, config, directorio_salida)
 
-    def _escanear_multi(self, cuentas, config, directorio_salida):
+    def _escanear_multi(self, cuenta_ids, config, directorio_salida):
         """Realiza el escaneo de múltiples cuentas de Gmail secuencialmente."""
         from app import db
-        from app.models import Escaneo
+        from app.models import Escaneo, CuentaGmail
 
         escaneo = Escaneo.query.get(self.escaneo_id)
         if not escaneo:
+            return
+
+        # Re-consultar las cuentas dentro del contexto de este hilo
+        cuentas = CuentaGmail.query.filter(CuentaGmail.id.in_(cuenta_ids)).all()
+        if not cuentas:
+            escaneo.estado = 'error'
+            escaneo.mensaje_error = 'No se encontraron cuentas validas'
+            escaneo.fecha_fin = datetime.utcnow()
+            db.session.commit()
             return
 
         self.estado_motor = self.ESTADO_EJECUTANDO
