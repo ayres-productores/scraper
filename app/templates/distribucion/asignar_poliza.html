@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block title %}Asignar Póliza - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Asignar Póliza a Cliente</h1>
+    <a href="{{ url_for('distribucion.clientes') }}" class="btn btn-outline">&#8592; Volver</a>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form method="POST" class="form-asignar">
+            {{ form.hidden_tag() }}
+
+            <div class="form-section">
+                <h3>Selección</h3>
+
+                <div class="form-group">
+                    <label for="cliente_id">Cliente *</label>
+                    {{ form.cliente_id(class="form-control") }}
+                    {% if form.cliente_id.errors %}
+                    <span class="error-text">{{ form.cliente_id.errors[0] }}</span>
+                    {% endif %}
+                </div>
+
+                <div class="form-group">
+                    <label for="archivo_id">Archivo PDF *</label>
+                    {{ form.archivo_id(class="form-control") }}
+                    {% if form.archivo_id.errors %}
+                    <span class="error-text">{{ form.archivo_id.errors[0] }}</span>
+                    {% endif %}
+                    <small class="form-text">Selecciona el PDF de la póliza descargado del extractor</small>
+                </div>
+            </div>
+
+            <div class="form-section">
+                <h3>Detalles de la Póliza</h3>
+
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label for="numero_poliza">Número de Póliza</label>
+                        {{ form.numero_poliza(class="form-control", placeholder="POL-123456") }}
+                    </div>
+                    <div class="form-group half">
+                        <label for="tipo_seguro">Tipo de Seguro</label>
+                        {{ form.tipo_seguro(class="form-control") }}
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label for="fecha_vigencia_desde">Vigencia Desde</label>
+                        {{ form.fecha_vigencia_desde(class="form-control", type="date") }}
+                    </div>
+                    <div class="form-group half">
+                        <label for="fecha_vigencia_hasta">Vigencia Hasta</label>
+                        {{ form.fecha_vigencia_hasta(class="form-control", type="date") }}
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="prima_anual">Prima Anual (&euro;)</label>
+                    {{ form.prima_anual(class="form-control", placeholder="0.00", style="max-width: 200px") }}
+                </div>
+
+                <div class="form-group">
+                    <label for="notas">Notas</label>
+                    {{ form.notas(class="form-control", rows="3", placeholder="Notas adicionales sobre esta póliza...") }}
+                </div>
+            </div>
+
+            <div class="form-section">
+                <h3>Opciones de Envío</h3>
+
+                <div class="form-group">
+                    <label class="checkbox-label checkbox-destacado">
+                        {{ form.enviar_inmediatamente(class="checkbox") }}
+                        <span>&#128172; Enviar por WhatsApp inmediatamente después de asignar</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <a href="{{ url_for('distribucion.clientes') }}" class="btn btn-outline">Cancelar</a>
+                {{ form.submit(class="btn btn-primary") }}
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.form-asignar {
+    max-width: 700px;
+}
+
+.form-section {
+    margin-bottom: 2rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--gray-light);
+}
+
+.form-section:last-of-type {
+    border-bottom: none;
+}
+
+.form-section h3 {
+    margin-bottom: 1rem;
+    color: var(--dark);
+}
+
+.checkbox-destacado {
+    background: var(--light);
+    padding: 1rem;
+    border-radius: var(--radius-sm);
+    border: 2px solid var(--success);
+}
+
+.form-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: flex-end;
+    padding-top: 1rem;
+}
+</style>
+{% endblock %}

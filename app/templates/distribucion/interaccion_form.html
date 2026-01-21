@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}{{ titulo }} - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <a href="{{ url_for('distribucion.interacciones_cliente', cliente_id=cliente.id) }}" class="btn btn-sm btn-outline">&larr; Volver</a>
+    <h1>{{ titulo }}</h1>
+    <p class="text-muted">{{ cliente.nombre_completo }}</p>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form method="POST">
+            {{ form.hidden_tag() }}
+
+            <div class="form-row">
+                <div class="form-group">
+                    {{ form.tipo.label }}
+                    {{ form.tipo(class="form-control") }}
+                    {% if form.tipo.errors %}
+                    <span class="error">{{ form.tipo.errors[0] }}</span>
+                    {% endif %}
+                </div>
+                <div class="form-group">
+                    {{ form.direccion.label }}
+                    {{ form.direccion(class="form-control") }}
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    {{ form.poliza_cliente_id.label }}
+                    {{ form.poliza_cliente_id(class="form-control") }}
+                </div>
+                <div class="form-group">
+                    {{ form.duracion_minutos.label }}
+                    {{ form.duracion_minutos(class="form-control", placeholder="Duracion en minutos") }}
+                </div>
+            </div>
+
+            <div class="form-group">
+                {{ form.asunto.label }}
+                {{ form.asunto(class="form-control", placeholder="Asunto o motivo de la interaccion") }}
+            </div>
+
+            <div class="form-group">
+                {{ form.descripcion.label }}
+                {{ form.descripcion(class="form-control", rows="5", placeholder="Describe la interaccion en detalle...") }}
+                {% if form.descripcion.errors %}
+                <span class="error">{{ form.descripcion.errors[0] }}</span>
+                {% endif %}
+            </div>
+
+            <div class="seguimiento-section">
+                <h4>Seguimiento</h4>
+                <div class="form-check">
+                    {{ form.requiere_seguimiento(class="form-check-input") }}
+                    {{ form.requiere_seguimiento.label(class="form-check-label") }}
+                </div>
+                <div class="form-group" id="fecha_seguimiento_grupo" style="display: none;">
+                    {{ form.fecha_seguimiento.label }}
+                    {{ form.fecha_seguimiento(class="form-control") }}
+                </div>
+            </div>
+
+            <div class="form-actions">
+                {{ form.submit(class="btn btn-primary") }}
+                <a href="{{ url_for('distribucion.interacciones_cliente', cliente_id=cliente.id) }}" class="btn btn-outline">Cancelar</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.seguimiento-section {
+    background: var(--light);
+    padding: 1rem;
+    border-radius: var(--radius-sm);
+    margin: 1rem 0;
+}
+.seguimiento-section h4 { margin-bottom: 0.5rem; }
+.form-check { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const chkSeguimiento = document.querySelector('[name="requiere_seguimiento"]');
+const grupoFecha = document.getElementById('fecha_seguimiento_grupo');
+
+function toggleFechaSeguimiento() {
+    grupoFecha.style.display = chkSeguimiento.checked ? 'block' : 'none';
+}
+
+chkSeguimiento.addEventListener('change', toggleFechaSeguimiento);
+toggleFechaSeguimiento();
+</script>
+{% endblock %}

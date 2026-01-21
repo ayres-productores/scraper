@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+
+{% block title %}Clientes - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Cartera de Clientes</h1>
+    <a href="{{ url_for('distribucion.nuevo_cliente') }}" class="btn btn-primary">+ Nuevo Cliente</a>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <form method="GET" class="filtros-form">
+            <div class="filtro-grupo">
+                <input type="text" name="busqueda" class="form-control" placeholder="Buscar por nombre, teléfono..." value="{{ busqueda }}">
+                <button type="submit" class="btn btn-outline">&#128269;</button>
+            </div>
+            <label class="checkbox-label">
+                <input type="checkbox" name="solo_activos" value="1" {% if solo_activos %}checked{% endif %} onchange="this.form.submit()">
+                Solo activos
+            </label>
+        </form>
+    </div>
+    <div class="card-body">
+        {% if clientes %}
+        <div class="clientes-lista">
+            {% for cliente in clientes %}
+            <div class="cliente-card">
+                <div class="cliente-avatar">
+                    <span>&#128100;</span>
+                </div>
+                <div class="cliente-info">
+                    <div class="cliente-nombre">
+                        <strong>{{ cliente.nombre_completo }}</strong>
+                        {% if not cliente.activo %}
+                        <span class="badge badge-secondary">Inactivo</span>
+                        {% endif %}
+                    </div>
+                    <div class="cliente-contacto">
+                        <span class="contacto-item">&#128241; {{ cliente.telefono_whatsapp }}</span>
+                        {% if cliente.email %}
+                        <span class="contacto-item">&#128231; {{ cliente.email }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="cliente-stats">
+                        <span>&#128196; {{ cliente.polizas.count() }} pólizas</span>
+                        {% if cliente.ultimo_envio %}
+                        <span>&#128172; Último envío: {{ cliente.ultimo_envio.strftime('%d/%m/%Y') }}</span>
+                        {% else %}
+                        <span class="text-muted">Sin envíos</span>
+                        {% endif %}
+                    </div>
+                    <div class="cliente-mensaje">
+                        {% if cliente.usar_mensaje_estandar %}
+                        <span class="badge badge-outline">&#128172; Mensaje estándar</span>
+                        {% else %}
+                        <span class="badge badge-primary">&#128172; Mensaje personalizado</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="cliente-acciones">
+                    <a href="{{ url_for('distribucion.cliente_detalle', cliente_id=cliente.id) }}" class="btn btn-sm btn-outline">Ver</a>
+                    <a href="{{ url_for('distribucion.asignar_poliza') }}?cliente_id={{ cliente.id }}" class="btn btn-sm btn-primary">Asignar</a>
+                    <a href="{{ url_for('distribucion.enviar_directo', cliente_id=cliente.id) }}" class="btn btn-sm btn-success" target="_blank" title="Enviar WhatsApp">&#128172;</a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <span class="empty-icon">&#128100;</span>
+            <h3>No hay clientes</h3>
+            <p>Agrega tu primer cliente para comenzar a distribuir pólizas.</p>
+            <a href="{{ url_for('distribucion.nuevo_cliente') }}" class="btn btn-primary">+ Nuevo Cliente</a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.filtros-form {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.filtro-grupo {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.filtro-grupo input {
+    min-width: 250px;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+}
+
+.clientes-lista {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.cliente-card {
+    display: flex;
+    align-items: flex-start;
+    padding: 1rem;
+    background: var(--light);
+    border-radius: var(--radius);
+    gap: 1rem;
+}
+
+.cliente-avatar {
+    flex-shrink: 0;
+    width: 50px;
+    height: 50px;
+    background: var(--primary);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+}
+
+.cliente-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.cliente-nombre {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.cliente-contacto {
+    display: flex;
+    gap: 1rem;
+    color: var(--gray);
+    font-size: 0.9rem;
+}
+
+.contacto-item {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.cliente-stats {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.85rem;
+    color: var(--gray);
+}
+
+.cliente-mensaje {
+    margin-top: 0.25rem;
+}
+
+.cliente-acciones {
+    display: flex;
+    gap: 0.5rem;
+    flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+    .cliente-card {
+        flex-direction: column;
+    }
+
+    .cliente-acciones {
+        width: 100%;
+        justify-content: flex-end;
+    }
+}
+</style>
+{% endblock %}

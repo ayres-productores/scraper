@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block title %}Enviar Póliza - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Enviar Póliza por WhatsApp</h1>
+    <a href="{{ url_for('distribucion.cliente_detalle', cliente_id=cliente.id) }}" class="btn btn-outline">&#8592; Volver</a>
+</div>
+
+<div class="grid-2">
+    <!-- Info del envío -->
+    <div class="card">
+        <div class="card-header">
+            <h2>Datos del Envío</h2>
+        </div>
+        <div class="card-body">
+            <div class="envio-info">
+                <div class="envio-row">
+                    <span class="envio-label">&#128100; Cliente:</span>
+                    <span class="envio-value">{{ cliente.nombre_completo }}</span>
+                </div>
+                <div class="envio-row">
+                    <span class="envio-label">&#128241; WhatsApp:</span>
+                    <span class="envio-value">{{ cliente.telefono_whatsapp }}</span>
+                </div>
+                {% if poliza.compania %}
+                <div class="envio-row">
+                    <span class="envio-label">&#127970; Compañía:</span>
+                    <span class="envio-value">{{ poliza.compania.nombre }}</span>
+                </div>
+                {% endif %}
+                {% if poliza.tipo_seguro %}
+                <div class="envio-row">
+                    <span class="envio-label">&#128196; Tipo:</span>
+                    <span class="envio-value">{{ poliza.tipo_seguro }}</span>
+                </div>
+                {% endif %}
+                {% if poliza.numero_poliza %}
+                <div class="envio-row">
+                    <span class="envio-label">&#128203; Nº Póliza:</span>
+                    <span class="envio-value">{{ poliza.numero_poliza }}</span>
+                </div>
+                {% endif %}
+                {% if poliza.archivo %}
+                <div class="envio-row">
+                    <span class="envio-label">&#128196; Archivo:</span>
+                    <span class="envio-value">{{ poliza.archivo.nombre_archivo[:40] }}...</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Formulario de mensaje -->
+    <div class="card">
+        <div class="card-header">
+            <h2>&#128172; Mensaje</h2>
+        </div>
+        <div class="card-body">
+            <form method="POST">
+                {{ form.hidden_tag() }}
+
+                <div class="form-group">
+                    <label for="mensaje">Mensaje a enviar</label>
+                    {{ form.mensaje(class="form-control", rows="10") }}
+                    <small class="form-text">Puedes editar el mensaje antes de enviar</small>
+                </div>
+
+                <div class="alert alert-info">
+                    <strong>Nota:</strong> Al hacer clic en "Enviar", se abrirá WhatsApp Web en una nueva ventana con el mensaje pre-cargado. El archivo PDF deberá adjuntarse manualmente.
+                </div>
+
+                <div class="form-actions">
+                    <a href="{{ url_for('distribucion.cliente_detalle', cliente_id=cliente.id) }}" class="btn btn-outline">Cancelar</a>
+                    {{ form.submit(class="btn btn-success btn-lg") }}
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.envio-info {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.envio-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.envio-label {
+    min-width: 120px;
+    color: var(--gray);
+    font-size: 0.9rem;
+}
+
+.envio-value {
+    font-weight: 500;
+}
+
+.form-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: flex-end;
+    margin-top: 1rem;
+}
+</style>
+{% endblock %}

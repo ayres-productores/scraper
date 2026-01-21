@@ -1,0 +1,263 @@
+{% extends "base.html" %}
+
+{% block title %}Interprete de Polizas PDF - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <a href="{{ url_for('distribucion.index') }}" class="btn btn-sm btn-outline">&larr; Volver</a>
+        <h1>Interprete de Polizas PDF</h1>
+        <p class="text-muted">Extrae y procesa datos de polizas desde archivos PDF</p>
+    </div>
+</div>
+
+<!-- Estadisticas -->
+<div class="stats-grid stats-4 mb-4">
+    <div class="stat-card">
+        <div class="stat-content">
+            <div class="stat-value">{{ stats.total }}</div>
+            <div class="stat-label">Total PDFs</div>
+        </div>
+    </div>
+    <div class="stat-card {% if stats.pendientes > 0 %}stat-card-warning{% endif %}">
+        <div class="stat-content">
+            <div class="stat-value">{{ stats.pendientes }}</div>
+            <div class="stat-label">Pendientes</div>
+        </div>
+    </div>
+    <div class="stat-card stat-card-success">
+        <div class="stat-content">
+            <div class="stat-value">{{ stats.procesados }}</div>
+            <div class="stat-label">Procesados</div>
+        </div>
+    </div>
+    <div class="stat-card {% if stats.requieren_revision > 0 %}stat-card-danger{% endif %}">
+        <div class="stat-content">
+            <div class="stat-value">{{ stats.requieren_revision }}</div>
+            <div class="stat-label">Requieren Revision</div>
+        </div>
+    </div>
+</div>
+
+<!-- PDFs Pendientes -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h2>PDFs Pendientes de Procesar ({{ pendientes|length }})</h2>
+        {% if pendientes %}
+        <button type="button" class="btn btn-sm btn-primary" onclick="mostrarProcesoLote()">
+            Procesar Lote
+        </button>
+        {% endif %}
+    </div>
+    <div class="card-body">
+        {% if pendientes %}
+        <form id="form-lote" method="POST" action="{{ url_for('distribucion.procesar_lote_pdf') }}" style="display: none;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="lote-config mb-3">
+                <div class="form-group">
+                    <label>Asignar todas al cliente:</label>
+                    <select name="cliente_id" class="form-control" required>
+                        <option value="">Seleccionar cliente...</option>
+                        {% for cliente in current_user.clientes.filter_by(activo=True).all() %}
+                        <option value="{{ cliente.id }}">{{ cliente.nombre_completo }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="lote-actions">
+                    <button type="submit" class="btn btn-success">Procesar Seleccionados</button>
+                    <button type="button" class="btn btn-outline" onclick="ocultarProcesoLote()">Cancelar</button>
+                </div>
+            </div>
+        </form>
+
+        <table class="table">
+            <thead>
+                <tr>
+                    <th class="col-check" style="display: none;">
+                        <input type="checkbox" id="seleccionar-todos" onchange="toggleTodos(this)">
+                    </th>
+                    <th>Archivo</th>
+                    <th>Compania</th>
+                    <th>Fecha</th>
+                    <th>Tamano</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for archivo in pendientes %}
+                <tr>
+                    <td class="col-check" style="display: none;">
+                        <input type="checkbox" name="archivo_ids" value="{{ archivo.id }}" class="check-archivo" form="form-lote">
+                    </td>
+                    <td>
+                        <span class="file-icon">&#128196;</span>
+                        <a href="{{ url_for('main.ver_archivo', archivo_id=archivo.id) }}" target="_blank" title="Ver PDF">
+                            {{ archivo.nombre_archivo[:40] }}{% if archivo.nombre_archivo|length > 40 %}...{% endif %}
+                        </a>
+                    </td>
+                    <td>
+                        {% if archivo.compania %}
+                        <span class="badge badge-primary">{{ archivo.compania.nombre }}</span>
+                        {% else %}
+                        <span class="badge badge-secondary">Desconocida</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ archivo.fecha_correo.strftime('%d/%m/%Y') if archivo.fecha_correo else '-' }}</td>
+                    <td>{{ "%.1f"|format((archivo.tamano_bytes or 0) / 1024) }} KB</td>
+                    <td>
+                        <a href="{{ url_for('distribucion.extraer_pdf', archivo_id=archivo.id) }}" class="btn btn-sm btn-primary">
+                            Procesar
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <p>No hay PDFs pendientes de procesar.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- PDFs Procesados -->
+<div class="card">
+    <div class="card-header">
+        <h2>PDFs Procesados ({{ procesados|length }})</h2>
+    </div>
+    <div class="card-body">
+        {% if procesados %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Archivo</th>
+                    <th>Poliza</th>
+                    <th>Cliente</th>
+                    <th>Confianza</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in procesados %}
+                <tr class="{% if item.poliza.requiere_revision %}table-warning{% endif %}">
+                    <td>
+                        <span class="file-icon">&#128196;</span>
+                        <a href="{{ url_for('main.ver_archivo', archivo_id=item.archivo.id) }}" target="_blank">
+                            {{ item.archivo.nombre_archivo[:30] }}{% if item.archivo.nombre_archivo|length > 30 %}...{% endif %}
+                        </a>
+                    </td>
+                    <td>
+                        <a href="{{ url_for('distribucion.poliza_completa', poliza_id=item.poliza.id) }}">
+                            {{ item.poliza.numero_poliza or 'Sin numero' }}
+                        </a>
+                        <br><small class="text-muted">{{ item.poliza.tipo_seguro or '' }}</small>
+                    </td>
+                    <td>
+                        <a href="{{ url_for('distribucion.cliente_detalle', cliente_id=item.poliza.cliente.id) }}">
+                            {{ item.poliza.cliente.nombre_completo }}
+                        </a>
+                    </td>
+                    <td>
+                        <div class="confianza-bar">
+                            <div class="confianza-fill {% if item.confianza and item.confianza >= 0.8 %}alta{% elif item.confianza and item.confianza >= 0.5 %}media{% else %}baja{% endif %}"
+                                 style="width: {{ (item.confianza or 0) * 100 }}%"></div>
+                        </div>
+                        <small>{{ "%.0f"|format((item.confianza or 0) * 100) }}%</small>
+                    </td>
+                    <td>
+                        {% if item.poliza.requiere_revision %}
+                        <span class="badge badge-warning">Requiere revision</span>
+                        {% else %}
+                        <span class="badge badge-success">OK</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="{{ url_for('distribucion.extraer_pdf', archivo_id=item.archivo.id) }}" class="btn btn-sm btn-outline" title="Editar">
+                            &#9998;
+                        </a>
+                        <a href="{{ url_for('distribucion.reextraer_pdf', poliza_id=item.poliza.id) }}" class="btn btn-sm btn-outline" title="Re-extraer">
+                            &#8635;
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <p>No hay PDFs procesados aun.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.stats-4 { grid-template-columns: repeat(4, 1fr); }
+.stat-card-warning { border-left: 4px solid var(--warning); }
+.stat-card-success { border-left: 4px solid var(--success); }
+.stat-card-danger { border-left: 4px solid var(--danger); }
+
+.file-icon { margin-right: 0.5rem; }
+.empty-state { text-align: center; padding: 2rem; color: var(--gray); }
+
+.confianza-bar {
+    width: 60px;
+    height: 8px;
+    background: var(--gray-light);
+    border-radius: 4px;
+    overflow: hidden;
+    display: inline-block;
+    vertical-align: middle;
+    margin-right: 0.5rem;
+}
+.confianza-fill {
+    height: 100%;
+    border-radius: 4px;
+}
+.confianza-fill.alta { background: var(--success); }
+.confianza-fill.media { background: var(--warning); }
+.confianza-fill.baja { background: var(--danger); }
+
+.table-warning { background: rgba(255, 193, 7, 0.1); }
+
+.lote-config {
+    background: var(--light);
+    padding: 1rem;
+    border-radius: var(--radius);
+    display: flex;
+    gap: 1rem;
+    align-items: flex-end;
+}
+.lote-config .form-group { margin: 0; flex: 1; }
+.lote-actions { display: flex; gap: 0.5rem; }
+
+.col-check { width: 40px; text-align: center; }
+
+@media (max-width: 768px) {
+    .stats-4 { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function mostrarProcesoLote() {
+    document.getElementById('form-lote').style.display = 'block';
+    document.querySelectorAll('.col-check').forEach(el => el.style.display = 'table-cell');
+}
+
+function ocultarProcesoLote() {
+    document.getElementById('form-lote').style.display = 'none';
+    document.querySelectorAll('.col-check').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.check-archivo').forEach(cb => cb.checked = false);
+}
+
+function toggleTodos(checkbox) {
+    document.querySelectorAll('.check-archivo').forEach(cb => cb.checked = checkbox.checked);
+}
+</script>
+{% endblock %}

@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block title %}Administración - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Panel de Administración</h1>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-icon">&#128101;</div>
+        <div class="stat-content">
+            <div class="stat-value">{{ total_usuarios }}</div>
+            <div class="stat-label">Usuarios Totales</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">&#9989;</div>
+        <div class="stat-content">
+            <div class="stat-value">{{ usuarios_activos }}</div>
+            <div class="stat-label">Usuarios Activos</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">&#128269;</div>
+        <div class="stat-content">
+            <div class="stat-value">{{ total_escaneos }}</div>
+            <div class="stat-label">Escaneos Totales</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">&#128197;</div>
+        <div class="stat-content">
+            <div class="stat-value">{{ escaneos_hoy }}</div>
+            <div class="stat-label">Escaneos Hoy</div>
+        </div>
+    </div>
+</div>
+
+<div class="admin-nav">
+    <a href="{{ url_for('admin.usuarios') }}" class="admin-nav-item">
+        <span class="admin-nav-icon">&#128101;</span>
+        <span class="admin-nav-text">Gestión de Usuarios</span>
+    </a>
+    <a href="{{ url_for('admin.logs') }}" class="admin-nav-item">
+        <span class="admin-nav-icon">&#128220;</span>
+        <span class="admin-nav-text">Logs de Actividad</span>
+    </a>
+    <a href="{{ url_for('admin.estadisticas') }}" class="admin-nav-item">
+        <span class="admin-nav-icon">&#128202;</span>
+        <span class="admin-nav-text">Estadísticas</span>
+    </a>
+</div>
+
+<div class="grid-2">
+    <div class="card">
+        <div class="card-header">
+            <h2>Últimos Usuarios</h2>
+            <a href="{{ url_for('admin.usuarios') }}" class="btn btn-sm btn-outline">Ver todos</a>
+        </div>
+        <div class="card-body">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Usuario</th>
+                        <th>Rol</th>
+                        <th>Estado</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for usuario in ultimos_usuarios %}
+                    <tr>
+                        <td>
+                            <strong>{{ usuario.nombre }}</strong><br>
+                            <small class="text-muted">{{ usuario.correo }}</small>
+                        </td>
+                        <td>
+                            <span class="badge badge-{{ 'primary' if usuario.rol == 'admin' else 'secondary' }}">
+                                {{ usuario.rol }}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="badge badge-{{ 'success' if usuario.activo else 'danger' }}">
+                                {{ 'Activo' if usuario.activo else 'Inactivo' }}
+                            </span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h2>Actividad Reciente</h2>
+            <a href="{{ url_for('admin.logs') }}" class="btn btn-sm btn-outline">Ver todo</a>
+        </div>
+        <div class="card-body">
+            <div class="activity-list">
+                {% for log in ultimas_actividades %}
+                <div class="activity-item">
+                    <div class="activity-info">
+                        <strong>{{ log.accion }}</strong>
+                        <small>{{ log.usuario.correo if log.usuario else 'Sistema' }}</small>
+                    </div>
+                    <small class="text-muted">{{ log.fecha.strftime('%d/%m %H:%M') }}</small>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

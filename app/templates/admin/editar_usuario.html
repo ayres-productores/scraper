@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Editar Usuario - Administración{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Editar Usuario</h1>
+    <a href="{{ url_for('admin.usuarios') }}" class="btn btn-outline">Volver</a>
+</div>
+
+<div class="card" style="max-width: 600px;">
+    <div class="card-header">
+        <h2>{{ usuario.correo }}</h2>
+    </div>
+    <div class="card-body">
+        <form method="POST">
+            {{ form.hidden_tag() }}
+
+            <div class="form-group">
+                <label for="nombre">Nombre completo</label>
+                {{ form.nombre(class="form-control") }}
+                {% if form.nombre.errors %}
+                    <span class="error-text">{{ form.nombre.errors[0] }}</span>
+                {% endif %}
+            </div>
+
+            <div class="form-group">
+                <label for="rol">Rol</label>
+                {{ form.rol(class="form-control") }}
+            </div>
+
+            <div class="form-group checkbox-group">
+                {{ form.activo(class="checkbox") }}
+                <label for="activo">Cuenta activa</label>
+            </div>
+
+            <hr>
+
+            <div class="form-group">
+                <label for="nueva_contrasena">Nueva contraseña (opcional)</label>
+                {{ form.nueva_contrasena(class="form-control", placeholder="Dejar vacío para no cambiar") }}
+                {% if form.nueva_contrasena.errors %}
+                    <span class="error-text">{{ form.nueva_contrasena.errors[0] }}</span>
+                {% endif %}
+            </div>
+
+            <div class="form-group checkbox-group">
+                {{ form.forzar_cambio(class="checkbox") }}
+                <label for="forzar_cambio">Forzar cambio de contraseña en próximo inicio</label>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+                <a href="{{ url_for('admin.usuarios') }}" class="btn btn-outline">Cancelar</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

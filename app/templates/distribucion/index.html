@@ -1,0 +1,284 @@
+{% extends "base.html" %}
+
+{% block title %}Distribución - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Distribución de Pólizas</h1>
+    <p class="text-muted">Envía pólizas a tus clientes por WhatsApp</p>
+</div>
+
+{% if envios_pendientes > 0 %}
+<div class="queue-status-banner" id="queue-banner">
+    <div class="queue-indicator">
+        <span class="queue-spinner"></span>
+        <span class="queue-text">Procesando cola de envíos...</span>
+    </div>
+    <div class="queue-stats">
+        <span id="pendientes-count">{{ envios_pendientes }}</span> mensaje(s) en cola
+    </div>
+</div>
+{% endif %}
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-icon">&#128100;</div>
+        <div class="stat-content">
+            <div class="stat-value">{{ total_clientes }}</div>
+            <div class="stat-label">Clientes Activos</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">&#128196;</div>
+        <div class="stat-content">
+            <div class="stat-value">{{ total_polizas }}</div>
+            <div class="stat-label">Pólizas Asignadas</div>
+        </div>
+    </div>
+    <div class="stat-card stat-card-queue {% if envios_pendientes > 0 %}stat-processing{% endif %}">
+        <div class="stat-icon">&#128172;</div>
+        <div class="stat-content">
+            <div class="stat-value" id="stat-pendientes">{{ envios_pendientes }}</div>
+            <div class="stat-label">En Cola</div>
+        </div>
+    </div>
+    <div class="stat-card stat-card-success">
+        <div class="stat-icon">&#10004;</div>
+        <div class="stat-content">
+            <div class="stat-value">{{ envios_enviados }}</div>
+            <div class="stat-label">Enviados Hoy</div>
+        </div>
+    </div>
+</div>
+
+<div class="grid-2">
+    <div class="card">
+        <div class="card-header">
+            <h2>Acciones Rápidas</h2>
+        </div>
+        <div class="card-body">
+            <div class="quick-actions">
+                <a href="{{ url_for('distribucion.nuevo_cliente') }}" class="action-button">
+                    <span class="action-icon">&#128100;</span>
+                    <span class="action-text">Nuevo Cliente</span>
+                </a>
+                <a href="{{ url_for('distribucion.asignar_poliza') }}" class="action-button">
+                    <span class="action-icon">&#128196;</span>
+                    <span class="action-text">Asignar Póliza</span>
+                </a>
+                <a href="{{ url_for('distribucion.clientes') }}" class="action-button">
+                    <span class="action-icon">&#128203;</span>
+                    <span class="action-text">Ver Clientes</span>
+                </a>
+                <a href="{{ url_for('distribucion.plantillas') }}" class="action-button">
+                    <span class="action-icon">&#128221;</span>
+                    <span class="action-text">Plantillas</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h2>Envíos Recientes</h2>
+            <a href="{{ url_for('distribucion.historial_envios') }}" class="btn btn-sm btn-outline">Ver todos</a>
+        </div>
+        <div class="card-body">
+            {% if ultimos_envios %}
+            <div class="envios-lista">
+                {% for envio in ultimos_envios %}
+                <div class="envio-item">
+                    <div class="envio-estado">
+                        {% if envio.estado == 'enviado' %}
+                        <span class="estado-icon estado-success">&#10004;</span>
+                        {% elif envio.estado == 'error' %}
+                        <span class="estado-icon estado-error">&#10006;</span>
+                        {% else %}
+                        <span class="estado-icon estado-pending">&#8987;</span>
+                        {% endif %}
+                    </div>
+                    <div class="envio-info">
+                        <strong>{{ envio.cliente.nombre_completo }}</strong>
+                        <small>
+                            {% if envio.poliza %}
+                            {{ envio.poliza.tipo_seguro or 'Póliza' }}
+                            {% else %}
+                            Mensaje directo
+                            {% endif %}
+                        </small>
+                    </div>
+                    <div class="envio-fecha">
+                        <small>{{ envio.fecha_envio.strftime('%d/%m %H:%M') if envio.fecha_envio else 'Pendiente' }}</small>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-muted text-center">No hay envíos registrados</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.queue-status-banner {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 1rem 1.5rem;
+    border-radius: var(--radius);
+    margin-bottom: 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    animation: pulse-subtle 2s infinite;
+}
+
+@keyframes pulse-subtle {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.9; }
+}
+
+.queue-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.queue-spinner {
+    width: 20px;
+    height: 20px;
+    border: 3px solid rgba(255,255,255,0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.queue-stats {
+    font-weight: 500;
+}
+
+.stat-card-queue.stat-processing {
+    border-left: 4px solid var(--warning);
+    animation: glow-warning 2s infinite;
+}
+
+@keyframes glow-warning {
+    0%, 100% { box-shadow: 0 0 5px rgba(255, 193, 7, 0.3); }
+    50% { box-shadow: 0 0 20px rgba(255, 193, 7, 0.5); }
+}
+
+.stat-card-success {
+    border-left: 4px solid var(--success);
+}
+
+.envios-lista {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.envio-item {
+    display: flex;
+    align-items: center;
+    padding: 0.75rem;
+    background: var(--light);
+    border-radius: var(--radius-sm);
+    gap: 1rem;
+    transition: all 0.3s ease;
+}
+
+.envio-item.envio-nuevo {
+    animation: slideIn 0.5s ease;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateX(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.envio-estado {
+    flex-shrink: 0;
+}
+
+.estado-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    font-size: 0.9rem;
+}
+
+.estado-success {
+    background: var(--success);
+    color: white;
+}
+
+.estado-error {
+    background: var(--danger);
+    color: white;
+}
+
+.estado-pending {
+    background: var(--warning);
+    color: white;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+}
+
+.envio-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.envio-info small {
+    color: var(--gray);
+}
+
+.envio-fecha {
+    color: var(--gray);
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+{% if envios_pendientes > 0 %}
+// Auto-refresh cuando hay envíos pendientes
+setInterval(function() {
+    fetch('{{ url_for("distribucion.estado_cola") }}')
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('stat-pendientes').textContent = data.pendientes;
+            document.getElementById('pendientes-count').textContent = data.pendientes;
+
+            if (data.pendientes === 0) {
+                document.getElementById('queue-banner').style.display = 'none';
+                document.querySelector('.stat-card-queue').classList.remove('stat-processing');
+                // Recargar para mostrar envíos completados
+                setTimeout(() => location.reload(), 1000);
+            }
+        })
+        .catch(err => console.log('Error actualizando estado:', err));
+}, 5000);
+{% endif %}
+</script>
+{% endblock %}

@@ -1,0 +1,620 @@
+{% extends "base.html" %}
+
+{% block title %}Archivos - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Archivos Descargados</h1>
+    <div class="header-actions">
+        {% if archivos %}
+        <a href="{{ url_for('main.descargar_todos_archivos') }}" class="btn btn-primary">
+            &#128230; Descargar Todo (ZIP)
+        </a>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Filtros y controles de vista -->
+<div class="card filtros-card">
+    <div class="card-body">
+        <div class="filtros-row">
+            <div class="filtro-grupo">
+                <label for="filtro-compania">Filtrar por compañía:</label>
+                <select id="filtro-compania" class="form-control" onchange="filtrarPorCompania(this.value)">
+                    <option value="">Todas las compañías</option>
+                    {% for compania in companias %}
+                    <option value="{{ compania.id }}" {% if compania_seleccionada == compania.id %}selected{% endif %}>
+                        {{ compania.nombre }} ({{ compania.cantidad_documentos }})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="filtro-grupo">
+                <label>Vista:</label>
+                <div class="btn-group">
+                    <button type="button" class="btn btn-sm {% if vista == 'agrupada' %}btn-primary{% else %}btn-outline{% endif %}"
+                            onclick="cambiarVista('agrupada')">
+                        &#128193; Agrupada
+                    </button>
+                    <button type="button" class="btn btn-sm {% if vista == 'lista' %}btn-primary{% else %}btn-outline{% endif %}"
+                            onclick="cambiarVista('lista')">
+                        &#128196; Lista
+                    </button>
+                </div>
+            </div>
+            <div class="filtro-stats">
+                <span class="stat-badge">{{ archivos|length }} archivos</span>
+                <span class="stat-badge">{{ "%.2f"|format(tamano_total / 1024 / 1024) }} MB</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if archivos %}
+    {% if vista == 'agrupada' %}
+    <!-- Vista Agrupada por Compañía -->
+    <div class="companias-container">
+        {% for grupo in grupos_companias %}
+        <div class="card compania-card">
+            <div class="card-header compania-header" onclick="toggleCompania({{ grupo.compania.id }})">
+                <div class="compania-info">
+                    <span class="compania-toggle" id="toggle-{{ grupo.compania.id }}">&#9660;</span>
+                    <span class="compania-icon">&#127970;</span>
+                    <h3>{{ grupo.compania.nombre }}</h3>
+                    <span class="badge badge-primary">{{ grupo.archivos|length }} documentos</span>
+                </div>
+                <div class="compania-stats">
+                    <span class="text-muted">{{ "%.2f"|format(grupo.tamano_total / 1024 / 1024) }} MB</span>
+                </div>
+            </div>
+            <div class="card-body compania-archivos" id="archivos-{{ grupo.compania.id }}">
+                <table class="table table-compact">
+                    <thead>
+                        <tr>
+                            <th>Nombre</th>
+                            <th>Cuenta Origen</th>
+                            <th>Asunto</th>
+                            <th>Fecha</th>
+                            <th>Tamaño</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for archivo in grupo.archivos %}
+                        <tr>
+                            <td>
+                                <a href="#" class="pdf-link" onclick="abrirPdfViewer('{{ url_for('main.ver_archivo', archivo_id=archivo.id) }}', '{{ archivo.nombre_archivo|e }}'); return false;">
+                                    <span class="file-icon">&#128196;</span>
+                                    {{ archivo.nombre_archivo[:35] }}{% if archivo.nombre_archivo|length > 35 %}...{% endif %}
+                                </a>
+                            </td>
+                            <td>
+                                <small class="cuenta-origen">{{ archivo.cuenta_origen or '-' }}</small>
+                            </td>
+                            <td>{{ (archivo.asunto or '-')[:30] }}{% if archivo.asunto and archivo.asunto|length > 30 %}...{% endif %}</td>
+                            <td>{{ archivo.fecha_correo.strftime('%d/%m/%Y') if archivo.fecha_correo else '-' }}</td>
+                            <td>{{ "%.1f"|format((archivo.tamano_bytes or 0) / 1024) }} KB</td>
+                            <td class="actions-cell">
+                                <a href="{{ url_for('main.descargar_archivo', archivo_id=archivo.id) }}" class="btn btn-sm btn-outline" title="Descargar">
+                                    &#128229;
+                                </a>
+                                <form method="POST" action="{{ url_for('main.eliminar_archivo', archivo_id=archivo.id) }}" style="display: inline;" onsubmit="return confirm('¿Eliminar este archivo?')">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button type="submit" class="btn btn-sm btn-danger" title="Eliminar">
+                                        &#128465;
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endfor %}
+
+        {% if archivos_sin_compania %}
+        <div class="card compania-card">
+            <div class="card-header compania-header" onclick="toggleCompania('sin-compania')">
+                <div class="compania-info">
+                    <span class="compania-toggle" id="toggle-sin-compania">&#9660;</span>
+                    <span class="compania-icon">&#128300;</span>
+                    <h3>Sin Compañía Identificada</h3>
+                    <span class="badge badge-secondary">{{ archivos_sin_compania|length }} documentos</span>
+                </div>
+            </div>
+            <div class="card-body compania-archivos" id="archivos-sin-compania">
+                <table class="table table-compact">
+                    <thead>
+                        <tr>
+                            <th>Nombre</th>
+                            <th>Remitente</th>
+                            <th>Asunto</th>
+                            <th>Fecha</th>
+                            <th>Tamaño</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for archivo in archivos_sin_compania %}
+                        <tr>
+                            <td>
+                                <a href="#" class="pdf-link" onclick="abrirPdfViewer('{{ url_for('main.ver_archivo', archivo_id=archivo.id) }}', '{{ archivo.nombre_archivo|e }}'); return false;">
+                                    <span class="file-icon">&#128196;</span>
+                                    {{ archivo.nombre_archivo[:35] }}{% if archivo.nombre_archivo|length > 35 %}...{% endif %}
+                                </a>
+                            </td>
+                            <td>{{ (archivo.remitente or 'Desconocido')[:25] }}</td>
+                            <td>{{ (archivo.asunto or '-')[:30] }}{% if archivo.asunto and archivo.asunto|length > 30 %}...{% endif %}</td>
+                            <td>{{ archivo.fecha_correo.strftime('%d/%m/%Y') if archivo.fecha_correo else '-' }}</td>
+                            <td>{{ "%.1f"|format((archivo.tamano_bytes or 0) / 1024) }} KB</td>
+                            <td class="actions-cell">
+                                <a href="{{ url_for('main.descargar_archivo', archivo_id=archivo.id) }}" class="btn btn-sm btn-outline" title="Descargar">
+                                    &#128229;
+                                </a>
+                                <form method="POST" action="{{ url_for('main.eliminar_archivo', archivo_id=archivo.id) }}" style="display: inline;" onsubmit="return confirm('¿Eliminar este archivo?')">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button type="submit" class="btn btn-sm btn-danger" title="Eliminar">
+                                        &#128465;
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    {% else %}
+    <!-- Vista de Lista Plana -->
+    <div class="card">
+        <div class="card-header">
+            <h2>PDFs de Pólizas ({{ archivos|length }} archivos)</h2>
+        </div>
+        <div class="card-body">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Nombre</th>
+                        <th>Compañía</th>
+                        <th>Cuenta Origen</th>
+                        <th>Fecha Correo</th>
+                        <th>Tamaño</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for archivo in archivos %}
+                    <tr>
+                        <td>
+                            <a href="#" class="pdf-link" onclick="abrirPdfViewer('{{ url_for('main.ver_archivo', archivo_id=archivo.id) }}', '{{ archivo.nombre_archivo|e }}'); return false;">
+                                <span class="file-icon">&#128196;</span>
+                                {{ archivo.nombre_archivo[:40] }}{% if archivo.nombre_archivo|length > 40 %}...{% endif %}
+                            </a>
+                        </td>
+                        <td>
+                            {% if archivo.compania %}
+                            <span class="badge badge-primary">{{ archivo.compania.nombre }}</span>
+                            {% else %}
+                            <span class="badge badge-secondary">Desconocida</span>
+                            {% endif %}
+                        </td>
+                        <td><small>{{ archivo.cuenta_origen or '-' }}</small></td>
+                        <td>{{ archivo.fecha_correo.strftime('%d/%m/%Y') if archivo.fecha_correo else '-' }}</td>
+                        <td>{{ "%.2f"|format((archivo.tamano_bytes or 0) / 1024) }} KB</td>
+                        <td class="actions-cell">
+                            <a href="{{ url_for('main.descargar_archivo', archivo_id=archivo.id) }}" class="btn btn-sm btn-outline" title="Descargar">
+                                &#128229;
+                            </a>
+                            <form method="POST" action="{{ url_for('main.eliminar_archivo', archivo_id=archivo.id) }}" style="display: inline;" onsubmit="return confirm('¿Eliminar este archivo?')">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn btn-sm btn-danger" title="Eliminar">
+                                    &#128465;
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+<!-- Modal Visor de PDF -->
+<div id="pdf-modal" class="pdf-modal" onclick="cerrarPdfViewer(event)">
+    <div class="pdf-modal-content" onclick="event.stopPropagation()">
+        <div class="pdf-modal-header">
+            <span class="pdf-modal-title" id="pdf-modal-title">Documento</span>
+            <div class="pdf-modal-actions">
+                <a id="pdf-download-btn" href="#" class="btn btn-sm btn-outline" title="Descargar">&#128229; Descargar</a>
+                <button type="button" class="btn btn-sm btn-close" onclick="cerrarPdfViewer()" title="Cerrar">&times;</button>
+            </div>
+        </div>
+        <div class="pdf-modal-body">
+            <iframe id="pdf-iframe" src="" frameborder="0"></iframe>
+        </div>
+    </div>
+</div>
+
+{% else %}
+<div class="card">
+    <div class="card-body">
+        <div class="empty-state">
+            <span class="empty-icon">&#128193;</span>
+            <h3>No hay archivos</h3>
+            <p>Aún no has descargado ningún PDF. Inicia un escaneo para extraer pólizas de tu correo.</p>
+            <a href="{{ url_for('extractor.index') }}" class="btn btn-primary">Ir al Extractor</a>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.filtros-card {
+    margin-bottom: 1.5rem;
+}
+
+.filtros-row {
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+    flex-wrap: wrap;
+}
+
+.filtro-grupo {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.filtro-grupo label {
+    margin: 0;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.filtro-grupo select {
+    min-width: 200px;
+}
+
+.filtro-stats {
+    margin-left: auto;
+    display: flex;
+    gap: 0.75rem;
+}
+
+.stat-badge {
+    background: var(--light);
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius-sm);
+    font-weight: 500;
+    color: var(--gray-dark);
+}
+
+.btn-group {
+    display: flex;
+    gap: 0;
+}
+
+.btn-group .btn {
+    border-radius: 0;
+}
+
+.btn-group .btn:first-child {
+    border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+
+.btn-group .btn:last-child {
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.companias-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.compania-card {
+    overflow: hidden;
+}
+
+.compania-header {
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background 0.2s;
+}
+
+.compania-header:hover {
+    background: var(--light);
+}
+
+.compania-info {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.compania-info h3 {
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.compania-toggle {
+    font-size: 0.8rem;
+    transition: transform 0.2s;
+    display: inline-block;
+    width: 1rem;
+}
+
+.compania-toggle.collapsed {
+    transform: rotate(-90deg);
+}
+
+.compania-icon {
+    font-size: 1.25rem;
+}
+
+.compania-archivos {
+    padding: 0;
+    transition: max-height 0.3s ease-out;
+    overflow: hidden;
+}
+
+.compania-archivos.collapsed {
+    display: none;
+}
+
+.compania-archivos .table {
+    margin: 0;
+}
+
+.table-compact {
+    font-size: 0.9rem;
+}
+
+.table-compact th,
+.table-compact td {
+    padding: 0.5rem 0.75rem;
+}
+
+.cuenta-origen {
+    color: var(--gray);
+    font-size: 0.85rem;
+}
+
+.file-icon {
+    margin-right: 0.5rem;
+}
+
+@media (max-width: 768px) {
+    .filtros-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 1rem;
+    }
+
+    .filtro-grupo {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .filtro-stats {
+        margin-left: 0;
+        justify-content: center;
+    }
+}
+
+/* Estilos para links de PDF */
+.pdf-link {
+    color: var(--primary);
+    text-decoration: none;
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+.pdf-link:hover {
+    color: var(--primary-dark);
+    text-decoration: underline;
+}
+
+.pdf-link .file-icon {
+    margin-right: 0.5rem;
+}
+
+/* Modal del visor de PDF */
+.pdf-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    z-index: 9999;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+}
+
+.pdf-modal.active {
+    display: flex;
+}
+
+.pdf-modal-content {
+    background: white;
+    border-radius: var(--radius);
+    width: 100%;
+    max-width: 1200px;
+    height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 50px rgba(0, 0, 0, 0.5);
+}
+
+.pdf-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--light);
+    border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.pdf-modal-title {
+    font-weight: 600;
+    font-size: 1rem;
+    color: var(--dark);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 70%;
+}
+
+.pdf-modal-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.btn-close {
+    background: none;
+    border: 1px solid var(--border);
+    font-size: 1.5rem;
+    line-height: 1;
+    padding: 0.25rem 0.75rem;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    color: var(--gray-dark);
+    transition: all 0.2s;
+}
+
+.btn-close:hover {
+    background: var(--danger);
+    color: white;
+    border-color: var(--danger);
+}
+
+.pdf-modal-body {
+    flex: 1;
+    overflow: hidden;
+    border-radius: 0 0 var(--radius) var(--radius);
+}
+
+.pdf-modal-body iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+@media (max-width: 768px) {
+    .pdf-modal {
+        padding: 10px;
+    }
+
+    .pdf-modal-content {
+        height: 95vh;
+    }
+
+    .pdf-modal-header {
+        padding: 0.75rem 1rem;
+    }
+
+    .pdf-modal-title {
+        max-width: 50%;
+        font-size: 0.9rem;
+    }
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function filtrarPorCompania(companiaId) {
+    const url = new URL(window.location.href);
+    if (companiaId) {
+        url.searchParams.set('compania', companiaId);
+    } else {
+        url.searchParams.delete('compania');
+    }
+    window.location.href = url.toString();
+}
+
+function cambiarVista(vista) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('vista', vista);
+    window.location.href = url.toString();
+}
+
+function toggleCompania(companiaId) {
+    const archivosDiv = document.getElementById('archivos-' + companiaId);
+    const toggleIcon = document.getElementById('toggle-' + companiaId);
+
+    if (archivosDiv.classList.contains('collapsed')) {
+        archivosDiv.classList.remove('collapsed');
+        toggleIcon.classList.remove('collapsed');
+    } else {
+        archivosDiv.classList.add('collapsed');
+        toggleIcon.classList.add('collapsed');
+    }
+}
+
+// Funciones del visor de PDF
+function abrirPdfViewer(url, nombreArchivo) {
+    const modal = document.getElementById('pdf-modal');
+    const iframe = document.getElementById('pdf-iframe');
+    const titulo = document.getElementById('pdf-modal-title');
+    const downloadBtn = document.getElementById('pdf-download-btn');
+
+    // Configurar el modal
+    titulo.textContent = nombreArchivo;
+    iframe.src = url;
+
+    // Configurar boton de descarga (cambiar /ver/ por /descargar/)
+    downloadBtn.href = url.replace('/ver/', '/descargar/');
+
+    // Mostrar modal
+    modal.classList.add('active');
+
+    // Prevenir scroll del body
+    document.body.style.overflow = 'hidden';
+}
+
+function cerrarPdfViewer(event) {
+    // Si se hace click en el fondo (no en el contenido)
+    if (event && event.target !== document.getElementById('pdf-modal')) {
+        return;
+    }
+
+    const modal = document.getElementById('pdf-modal');
+    const iframe = document.getElementById('pdf-iframe');
+
+    // Ocultar modal
+    modal.classList.remove('active');
+
+    // Limpiar iframe
+    iframe.src = '';
+
+    // Restaurar scroll del body
+    document.body.style.overflow = '';
+}
+
+// Cerrar con tecla Escape
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        const modal = document.getElementById('pdf-modal');
+        if (modal && modal.classList.contains('active')) {
+            cerrarPdfViewer();
+        }
+    }
+});
+</script>
+{% endblock %}

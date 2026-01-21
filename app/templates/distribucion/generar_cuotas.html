@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Generar Cuotas - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <a href="{{ url_for('distribucion.pagos_poliza', poliza_id=poliza.id) }}" class="btn btn-sm btn-outline">&larr; Volver</a>
+    <h1>Generar Cuotas</h1>
+    <p class="text-muted">{{ poliza.cliente.nombre_completo }} | {{ poliza.numero_poliza or 'Sin numero' }}</p>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form method="POST">
+            {{ form.hidden_tag() }}
+
+            <div class="form-row">
+                <div class="form-group">
+                    {{ form.cantidad_cuotas.label }}
+                    {{ form.cantidad_cuotas(class="form-control") }}
+                    {% if form.cantidad_cuotas.errors %}
+                    <span class="error">{{ form.cantidad_cuotas.errors[0] }}</span>
+                    {% endif %}
+                </div>
+                <div class="form-group">
+                    {{ form.monto_cuota.label }}
+                    {{ form.monto_cuota(class="form-control") }}
+                    {% if form.monto_cuota.errors %}
+                    <span class="error">{{ form.monto_cuota.errors[0] }}</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    {{ form.fecha_primera_cuota.label }}
+                    {{ form.fecha_primera_cuota(class="form-control") }}
+                    {% if form.fecha_primera_cuota.errors %}
+                    <span class="error">{{ form.fecha_primera_cuota.errors[0] }}</span>
+                    {% endif %}
+                </div>
+                <div class="form-group">
+                    {{ form.periodicidad.label }}
+                    {{ form.periodicidad(class="form-control") }}
+                </div>
+            </div>
+
+            {% if poliza.prima_anual %}
+            <div class="info-box">
+                <strong>Prima anual:</strong> ${{ "%.2f"|format(poliza.prima_anual) }}
+                {% if form.cantidad_cuotas.data and poliza.prima_anual %}
+                <br><strong>Cuota sugerida:</strong> ${{ "%.2f"|format(poliza.prima_anual / form.cantidad_cuotas.data) }}
+                {% endif %}
+            </div>
+            {% endif %}
+
+            <div class="form-actions">
+                {{ form.submit(class="btn btn-primary") }}
+                <a href="{{ url_for('distribucion.pagos_poliza', poliza_id=poliza.id) }}" class="btn btn-outline">Cancelar</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.info-box { background: var(--light); padding: 1rem; border-radius: var(--radius-sm); margin: 1rem 0; }
+</style>
+{% endblock %}

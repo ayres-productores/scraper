@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+
+{% block title %}CRM - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Panel CRM</h1>
+    <p class="text-muted">Gestion integral de clientes y polizas</p>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-icon">&#128100;</div>
+        <div class="stat-content">
+            <div class="stat-value">{{ total_clientes }}</div>
+            <div class="stat-label">Clientes Activos</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">&#128196;</div>
+        <div class="stat-content">
+            <div class="stat-value">{{ total_polizas }}</div>
+            <div class="stat-label">Polizas Activas</div>
+        </div>
+    </div>
+    <div class="stat-card {% if polizas_por_vencer|length > 0 %}stat-card-warning{% endif %}">
+        <div class="stat-icon">&#9888;</div>
+        <div class="stat-content">
+            <div class="stat-value">{{ polizas_por_vencer|length }}</div>
+            <div class="stat-label">Por Vencer (30 dias)</div>
+        </div>
+    </div>
+    <div class="stat-card {% if siniestros_activos > 0 %}stat-card-danger{% endif %}">
+        <div class="stat-icon">&#128680;</div>
+        <div class="stat-content">
+            <div class="stat-value">{{ siniestros_activos }}</div>
+            <div class="stat-label">Siniestros Activos</div>
+        </div>
+    </div>
+</div>
+
+<div class="grid-2">
+    <!-- Polizas por vencer -->
+    <div class="card">
+        <div class="card-header">
+            <h2>Polizas por Vencer</h2>
+            <a href="{{ url_for('distribucion.alertas') }}" class="btn btn-sm btn-outline">Ver alertas</a>
+        </div>
+        <div class="card-body">
+            {% if polizas_por_vencer %}
+            <div class="table-responsive">
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>Cliente</th>
+                            <th>Poliza</th>
+                            <th>Vence</th>
+                            <th>Dias</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for poliza in polizas_por_vencer[:5] %}
+                        <tr class="{% if poliza.dias_para_vencimiento() <= 7 %}table-danger{% elif poliza.dias_para_vencimiento() <= 15 %}table-warning{% endif %}">
+                            <td>
+                                <a href="{{ url_for('distribucion.cliente_detalle', cliente_id=poliza.cliente.id) }}">
+                                    {{ poliza.cliente.nombre_completo }}
+                                </a>
+                            </td>
+                            <td>
+                                <a href="{{ url_for('distribucion.poliza_completa', poliza_id=poliza.id) }}">
+                                    {{ poliza.numero_poliza or 'Sin numero' }}
+                                </a>
+                            </td>
+                            <td>{{ poliza.fecha_vigencia_hasta.strftime('%d/%m/%Y') if poliza.fecha_vigencia_hasta else '-' }}</td>
+                            <td>
+                                <span class="badge {% if poliza.dias_para_vencimiento() <= 7 %}badge-danger{% elif poliza.dias_para_vencimiento() <= 15 %}badge-warning{% else %}badge-info{% endif %}">
+                                    {{ poliza.dias_para_vencimiento() }} dias
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% if polizas_por_vencer|length > 5 %}
+            <p class="text-muted text-center mt-2">Y {{ polizas_por_vencer|length - 5 }} mas...</p>
+            {% endif %}
+            {% else %}
+            <p class="text-muted text-center">No hay polizas por vencer en los proximos 30 dias</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Pagos pendientes -->
+    <div class="card">
+        <div class="card-header">
+            <h2>Pagos Pendientes</h2>
+            <a href="{{ url_for('distribucion.pagos_pendientes_todos') }}" class="btn btn-sm btn-outline">Ver todos</a>
+        </div>
+        <div class="card-body">
+            {% if pagos_pendientes %}
+            <div class="table-responsive">
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>Cliente</th>
+                            <th>Cuota</th>
+                            <th>Monto</th>
+                            <th>Vence</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for pago in pagos_pendientes %}
+                        <tr class="{% if pago.estado == 'vencido' %}table-danger{% endif %}">
+                            <td>{{ pago.poliza.cliente.nombre_completo }}</td>
+                            <td>{{ pago.numero_cuota or '-' }}</td>
+                            <td>${{ "%.2f"|format(pago.monto) }}</td>
+                            <td>{{ pago.fecha_vencimiento.strftime('%d/%m/%Y') }}</td>
+                            <td>
+                                <span class="badge {% if pago.estado == 'vencido' %}badge-danger{% else %}badge-warning{% endif %}">
+                                    {{ pago.estado|capitalize }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-muted text-center">No hay pagos pendientes</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="grid-2 mt-4">
+    <!-- Alertas pendientes -->
+    <div class="card">
+        <div class="card-header">
+            <h2>Alertas Pendientes</h2>
+            <div class="btn-group">
+                <form action="{{ url_for('distribucion.generar_alertas') }}" method="POST" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm btn-primary">Generar alertas</button>
+                </form>
+            </div>
+        </div>
+        <div class="card-body">
+            {% if alertas_pendientes %}
+            <div class="alertas-lista">
+                {% for alerta in alertas_pendientes %}
+                <div class="alerta-item alerta-{{ alerta.prioridad }}">
+                    <div class="alerta-icon">
+                        {% if alerta.tipo == 'vencimiento_poliza' %}&#128196;
+                        {% elif alerta.tipo == 'vencimiento_pago' %}&#128176;
+                        {% elif alerta.tipo == 'renovacion' %}&#128260;
+                        {% else %}&#128172;{% endif %}
+                    </div>
+                    <div class="alerta-content">
+                        <div class="alerta-mensaje">{{ alerta.mensaje }}</div>
+                        <small class="text-muted">{{ alerta.fecha_alerta.strftime('%d/%m/%Y') }}</small>
+                    </div>
+                    <div class="alerta-actions">
+                        <form action="{{ url_for('distribucion.resolver_alerta', alerta_id=alerta.id) }}" method="POST" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-success" title="Resolver">&#10004;</button>
+                        </form>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-muted text-center">No hay alertas pendientes</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Seguimientos pendientes -->
+    <div class="card">
+        <div class="card-header">
+            <h2>Seguimientos Pendientes</h2>
+        </div>
+        <div class="card-body">
+            {% if seguimientos %}
+            <div class="seguimientos-lista">
+                {% for seg in seguimientos %}
+                <div class="seguimiento-item">
+                    <div class="seguimiento-info">
+                        <strong>{{ seg.cliente.nombre_completo }}</strong>
+                        <small>{{ seg.tipo|capitalize }} - {{ seg.asunto or 'Sin asunto' }}</small>
+                        {% if seg.fecha_seguimiento %}
+                        <small class="text-muted">Seguimiento: {{ seg.fecha_seguimiento.strftime('%d/%m/%Y') }}</small>
+                        {% endif %}
+                    </div>
+                    <div class="seguimiento-actions">
+                        <a href="{{ url_for('distribucion.interacciones_cliente', cliente_id=seg.cliente_id) }}" class="btn btn-sm btn-outline">Ver</a>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-muted text-center">No hay seguimientos pendientes</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="card mt-4">
+    <div class="card-header">
+        <h2>Acciones Rapidas</h2>
+    </div>
+    <div class="card-body">
+        <div class="quick-actions">
+            <a href="{{ url_for('distribucion.nuevo_cliente') }}" class="action-button">
+                <span class="action-icon">&#128100;</span>
+                <span class="action-text">Nuevo Cliente</span>
+            </a>
+            <a href="{{ url_for('distribucion.asignar_poliza') }}" class="action-button">
+                <span class="action-icon">&#128196;</span>
+                <span class="action-text">Nueva Poliza</span>
+            </a>
+            <a href="{{ url_for('distribucion.pagos_pendientes_todos') }}" class="action-button">
+                <span class="action-icon">&#128176;</span>
+                <span class="action-text">Pagos Pendientes</span>
+            </a>
+            <a href="{{ url_for('distribucion.todos_siniestros') }}" class="action-button">
+                <span class="action-icon">&#128680;</span>
+                <span class="action-text">Siniestros</span>
+            </a>
+            <a href="{{ url_for('distribucion.clientes') }}" class="action-button">
+                <span class="action-icon">&#128203;</span>
+                <span class="action-text">Ver Clientes</span>
+            </a>
+            <a href="{{ url_for('distribucion.index') }}" class="action-button">
+                <span class="action-icon">&#128172;</span>
+                <span class="action-text">Envios WhatsApp</span>
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.stat-card-warning {
+    border-left: 4px solid var(--warning);
+}
+.stat-card-danger {
+    border-left: 4px solid var(--danger);
+}
+.badge {
+    padding: 0.25em 0.6em;
+    border-radius: var(--radius-sm);
+    font-size: 0.75em;
+    font-weight: 500;
+}
+.badge-danger { background: var(--danger); color: white; }
+.badge-warning { background: var(--warning); color: #333; }
+.badge-info { background: var(--primary); color: white; }
+.badge-success { background: var(--success); color: white; }
+
+.table-danger { background: rgba(220, 53, 69, 0.1); }
+.table-warning { background: rgba(255, 193, 7, 0.1); }
+
+.alertas-lista, .seguimientos-lista {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.alerta-item, .seguimiento-item {
+    display: flex;
+    align-items: center;
+    padding: 0.75rem;
+    background: var(--light);
+    border-radius: var(--radius-sm);
+    gap: 1rem;
+}
+.alerta-alta { border-left: 3px solid var(--danger); }
+.alerta-media { border-left: 3px solid var(--warning); }
+.alerta-baja { border-left: 3px solid var(--primary); }
+
+.alerta-icon { font-size: 1.5rem; }
+.alerta-content { flex: 1; }
+.alerta-mensaje { font-weight: 500; }
+
+.seguimiento-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+.seguimiento-info small {
+    color: var(--gray);
+}
+</style>
+{% endblock %}

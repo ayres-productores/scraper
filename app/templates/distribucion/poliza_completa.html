@@ -1,0 +1,496 @@
+{% extends "base.html" %}
+
+{% block title %}Poliza {{ poliza.numero_poliza or poliza.id }} - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <a href="{{ url_for('distribucion.cliente_detalle', cliente_id=poliza.cliente.id) }}" class="btn btn-sm btn-outline">&larr; Volver al cliente</a>
+        <h1>Poliza: {{ poliza.numero_poliza or 'Sin numero' }}</h1>
+        <p class="text-muted">{{ poliza.cliente.nombre_completo }} | {{ poliza.compania.nombre if poliza.compania else 'Sin compania' }}</p>
+    </div>
+    <div class="header-actions">
+        <span class="badge badge-lg {% if poliza.estado == 'activa' %}badge-success{% elif poliza.estado == 'vencida' %}badge-danger{% elif poliza.estado == 'cancelada' %}badge-dark{% else %}badge-warning{% endif %}">
+            {{ poliza.estado|upper }}
+        </span>
+        {% if poliza.dias_para_vencimiento() is not none %}
+        <span class="badge badge-lg {% if poliza.dias_para_vencimiento() < 0 %}badge-danger{% elif poliza.dias_para_vencimiento() <= 30 %}badge-warning{% else %}badge-info{% endif %}">
+            {% if poliza.dias_para_vencimiento() < 0 %}
+            Vencida hace {{ -poliza.dias_para_vencimiento() }} dias
+            {% else %}
+            {{ poliza.dias_para_vencimiento() }} dias restantes
+            {% endif %}
+        </span>
+        {% endif %}
+    </div>
+</div>
+
+<div class="tabs">
+    <button class="tab-btn active" data-tab="datos">Datos de la Poliza</button>
+    <button class="tab-btn" data-tab="pagos">Pagos ({{ pagos|length }})</button>
+    <button class="tab-btn" data-tab="siniestros">Siniestros ({{ siniestros|length }})</button>
+    <button class="tab-btn" data-tab="historial">Historial ({{ interacciones|length }})</button>
+</div>
+
+<!-- Tab Datos -->
+<div class="tab-content active" id="tab-datos">
+    <form method="POST" action="{{ url_for('distribucion.poliza_completa', poliza_id=poliza.id) }}">
+        {{ form.hidden_tag() }}
+
+        <div class="grid-2">
+            <!-- Datos Basicos -->
+            <div class="card">
+                <div class="card-header"><h3>Datos Basicos</h3></div>
+                <div class="card-body">
+                    <div class="form-group">
+                        {{ form.cliente_id.label }}
+                        {{ form.cliente_id(class="form-control") }}
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            {{ form.numero_poliza.label }}
+                            {{ form.numero_poliza(class="form-control") }}
+                        </div>
+                        <div class="form-group">
+                            {{ form.tipo_seguro.label }}
+                            {{ form.tipo_seguro(class="form-control") }}
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            {{ form.fecha_vigencia_desde.label }}
+                            {{ form.fecha_vigencia_desde(class="form-control") }}
+                        </div>
+                        <div class="form-group">
+                            {{ form.fecha_vigencia_hasta.label }}
+                            {{ form.fecha_vigencia_hasta(class="form-control") }}
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            {{ form.prima_anual.label }}
+                            {{ form.prima_anual(class="form-control") }}
+                        </div>
+                        <div class="form-group">
+                            {{ form.estado.label }}
+                            {{ form.estado(class="form-control") }}
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            {{ form.compania_id.label }}
+                            {{ form.compania_id(class="form-control") }}
+                        </div>
+                        <div class="form-group">
+                            {{ form.archivo_id.label }}
+                            {{ form.archivo_id(class="form-control") }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Datos del Asegurado -->
+            <div class="card">
+                <div class="card-header"><h3>Datos del Asegurado</h3></div>
+                <div class="card-body">
+                    <div class="form-group">
+                        {{ form.asegurado_nombre.label }}
+                        {{ form.asegurado_nombre(class="form-control") }}
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            {{ form.asegurado_documento.label }}
+                            {{ form.asegurado_documento(class="form-control") }}
+                        </div>
+                        <div class="form-group">
+                            {{ form.asegurado_telefono.label }}
+                            {{ form.asegurado_telefono(class="form-control") }}
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        {{ form.asegurado_direccion.label }}
+                        {{ form.asegurado_direccion(class="form-control") }}
+                    </div>
+                    <div class="form-group">
+                        {{ form.asegurado_email.label }}
+                        {{ form.asegurado_email(class="form-control") }}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid-2 mt-4">
+            <!-- Bien Asegurado -->
+            <div class="card">
+                <div class="card-header"><h3>Bien Asegurado</h3></div>
+                <div class="card-body">
+                    <div class="form-row">
+                        <div class="form-group">
+                            {{ form.bien_asegurado_tipo.label }}
+                            {{ form.bien_asegurado_tipo(class="form-control", id="bien_tipo") }}
+                        </div>
+                        <div class="form-group">
+                            {{ form.bien_asegurado_valor.label }}
+                            {{ form.bien_asegurado_valor(class="form-control") }}
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        {{ form.bien_asegurado_descripcion.label }}
+                        {{ form.bien_asegurado_descripcion(class="form-control", rows="2") }}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Coberturas -->
+            <div class="card">
+                <div class="card-header"><h3>Coberturas</h3></div>
+                <div class="card-body">
+                    <div class="form-row">
+                        <div class="form-group">
+                            {{ form.suma_asegurada.label }}
+                            {{ form.suma_asegurada(class="form-control") }}
+                        </div>
+                        <div class="form-group">
+                            {{ form.deducible.label }}
+                            {{ form.deducible(class="form-control") }}
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        {{ form.coberturas_texto.label }}
+                        {{ form.coberturas_texto(class="form-control", rows="4", placeholder="Una cobertura por linea") }}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Datos de Vehiculo (condicional) -->
+        <div class="card mt-4" id="seccion_vehiculo" style="display: none;">
+            <div class="card-header"><h3>Datos del Vehiculo</h3></div>
+            <div class="card-body">
+                <div class="grid-4">
+                    <div class="form-group">
+                        {{ form.vehiculo_marca.label }}
+                        {{ form.vehiculo_marca(class="form-control") }}
+                    </div>
+                    <div class="form-group">
+                        {{ form.vehiculo_modelo.label }}
+                        {{ form.vehiculo_modelo(class="form-control") }}
+                    </div>
+                    <div class="form-group">
+                        {{ form.vehiculo_anio.label }}
+                        {{ form.vehiculo_anio(class="form-control") }}
+                    </div>
+                    <div class="form-group">
+                        {{ form.vehiculo_patente.label }}
+                        {{ form.vehiculo_patente(class="form-control") }}
+                    </div>
+                </div>
+                <div class="grid-4">
+                    <div class="form-group">
+                        {{ form.vehiculo_chasis.label }}
+                        {{ form.vehiculo_chasis(class="form-control") }}
+                    </div>
+                    <div class="form-group">
+                        {{ form.vehiculo_motor.label }}
+                        {{ form.vehiculo_motor(class="form-control") }}
+                    </div>
+                    <div class="form-group">
+                        {{ form.vehiculo_color.label }}
+                        {{ form.vehiculo_color(class="form-control") }}
+                    </div>
+                    <div class="form-group">
+                        {{ form.vehiculo_uso.label }}
+                        {{ form.vehiculo_uso(class="form-control") }}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Datos de Inmueble (condicional) -->
+        <div class="card mt-4" id="seccion_inmueble" style="display: none;">
+            <div class="card-header"><h3>Datos del Inmueble</h3></div>
+            <div class="card-body">
+                <div class="form-group">
+                    {{ form.inmueble_direccion.label }}
+                    {{ form.inmueble_direccion(class="form-control") }}
+                </div>
+                <div class="grid-3">
+                    <div class="form-group">
+                        {{ form.inmueble_tipo.label }}
+                        {{ form.inmueble_tipo(class="form-control") }}
+                    </div>
+                    <div class="form-group">
+                        {{ form.inmueble_superficie.label }}
+                        {{ form.inmueble_superficie(class="form-control") }}
+                    </div>
+                    <div class="form-group">
+                        {{ form.inmueble_construccion.label }}
+                        {{ form.inmueble_construccion(class="form-control") }}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid-2 mt-4">
+            <!-- Forma de Pago -->
+            <div class="card">
+                <div class="card-header"><h3>Forma de Pago</h3></div>
+                <div class="card-body">
+                    <div class="form-row">
+                        <div class="form-group">
+                            {{ form.forma_pago.label }}
+                            {{ form.forma_pago(class="form-control") }}
+                        </div>
+                        <div class="form-group">
+                            {{ form.cantidad_cuotas.label }}
+                            {{ form.cantidad_cuotas(class="form-control") }}
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            {{ form.dia_vencimiento_cuota.label }}
+                            {{ form.dia_vencimiento_cuota(class="form-control") }}
+                        </div>
+                        <div class="form-group">
+                            {{ form.medio_pago.label }}
+                            {{ form.medio_pago(class="form-control") }}
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        {{ form.renovacion_automatica() }} {{ form.renovacion_automatica.label }}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Productor -->
+            <div class="card">
+                <div class="card-header"><h3>Contacto Productor</h3></div>
+                <div class="card-body">
+                    <div class="form-group">
+                        {{ form.productor_nombre.label }}
+                        {{ form.productor_nombre(class="form-control") }}
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            {{ form.productor_telefono.label }}
+                            {{ form.productor_telefono(class="form-control") }}
+                        </div>
+                        <div class="form-group">
+                            {{ form.productor_email.label }}
+                            {{ form.productor_email(class="form-control") }}
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        {{ form.sucursal.label }}
+                        {{ form.sucursal(class="form-control") }}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card mt-4">
+            <div class="card-header"><h3>Notas</h3></div>
+            <div class="card-body">
+                {{ form.notas(class="form-control", rows="3") }}
+            </div>
+        </div>
+
+        <div class="form-actions mt-4">
+            {{ form.submit(class="btn btn-primary btn-lg") }}
+            <a href="{{ url_for('distribucion.cliente_detalle', cliente_id=poliza.cliente.id) }}" class="btn btn-outline">Cancelar</a>
+        </div>
+    </form>
+</div>
+
+<!-- Tab Pagos -->
+<div class="tab-content" id="tab-pagos">
+    <div class="card">
+        <div class="card-header">
+            <h3>Pagos de la Poliza</h3>
+            <div class="btn-group">
+                <a href="{{ url_for('distribucion.nuevo_pago', poliza_id=poliza.id) }}" class="btn btn-primary btn-sm">+ Nuevo Pago</a>
+                <a href="{{ url_for('distribucion.generar_cuotas', poliza_id=poliza.id) }}" class="btn btn-outline btn-sm">Generar Cuotas</a>
+            </div>
+        </div>
+        <div class="card-body">
+            {% if pagos %}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Cuota</th>
+                        <th>Monto</th>
+                        <th>Vencimiento</th>
+                        <th>Fecha Pago</th>
+                        <th>Estado</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for pago in pagos %}
+                    <tr class="{% if pago.estado == 'vencido' %}table-danger{% elif pago.estado == 'pagado' %}table-success{% endif %}">
+                        <td>{{ pago.numero_cuota or '-' }}</td>
+                        <td>${{ "%.2f"|format(pago.monto) }}</td>
+                        <td>{{ pago.fecha_vencimiento.strftime('%d/%m/%Y') }}</td>
+                        <td>{{ pago.fecha_pago.strftime('%d/%m/%Y') if pago.fecha_pago else '-' }}</td>
+                        <td>
+                            <span class="badge {% if pago.estado == 'pagado' %}badge-success{% elif pago.estado == 'vencido' %}badge-danger{% else %}badge-warning{% endif %}">
+                                {{ pago.estado|capitalize }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if pago.estado in ['pendiente', 'vencido'] %}
+                            <form action="{{ url_for('distribucion.marcar_pago_pagado', pago_id=pago.id) }}" method="POST" style="display:inline;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn btn-sm btn-success">Pagado</button>
+                            </form>
+                            {% endif %}
+                            <a href="{{ url_for('distribucion.editar_pago', pago_id=pago.id) }}" class="btn btn-sm btn-outline">Editar</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="text-muted text-center">No hay pagos registrados</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Tab Siniestros -->
+<div class="tab-content" id="tab-siniestros">
+    <div class="card">
+        <div class="card-header">
+            <h3>Siniestros</h3>
+            <a href="{{ url_for('distribucion.nuevo_siniestro', poliza_id=poliza.id) }}" class="btn btn-primary btn-sm">+ Nuevo Siniestro</a>
+        </div>
+        <div class="card-body">
+            {% if siniestros %}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Numero</th>
+                        <th>Fecha</th>
+                        <th>Tipo</th>
+                        <th>Estado</th>
+                        <th>Monto</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for sin in siniestros %}
+                    <tr>
+                        <td>{{ sin.numero_siniestro or sin.id }}</td>
+                        <td>{{ sin.fecha_ocurrencia.strftime('%d/%m/%Y') }}</td>
+                        <td>{{ sin.tipo_siniestro or '-' }}</td>
+                        <td>
+                            <span class="badge {% if sin.estado == 'pagado' %}badge-success{% elif sin.estado == 'rechazado' %}badge-danger{% else %}badge-info{% endif %}">
+                                {{ sin.estado|capitalize }}
+                            </span>
+                        </td>
+                        <td>${{ "%.2f"|format(sin.monto_reclamado) if sin.monto_reclamado else '-' }}</td>
+                        <td>
+                            <a href="{{ url_for('distribucion.editar_siniestro', siniestro_id=sin.id) }}" class="btn btn-sm btn-outline">Ver/Editar</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="text-muted text-center">No hay siniestros registrados</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Tab Historial -->
+<div class="tab-content" id="tab-historial">
+    <div class="card">
+        <div class="card-header">
+            <h3>Historial de Interacciones</h3>
+            <a href="{{ url_for('distribucion.nueva_interaccion', cliente_id=poliza.cliente.id) }}" class="btn btn-primary btn-sm">+ Nueva Interaccion</a>
+        </div>
+        <div class="card-body">
+            {% if interacciones %}
+            <div class="timeline">
+                {% for inter in interacciones %}
+                <div class="timeline-item">
+                    <div class="timeline-icon">
+                        {% if inter.tipo == 'llamada' %}&#128222;
+                        {% elif inter.tipo == 'email' %}&#128231;
+                        {% elif inter.tipo == 'whatsapp' %}&#128172;
+                        {% elif inter.tipo == 'reunion' %}&#128197;
+                        {% else %}&#128221;{% endif %}
+                    </div>
+                    <div class="timeline-content">
+                        <div class="timeline-header">
+                            <strong>{{ inter.tipo|capitalize }}</strong>
+                            {% if inter.direccion %}<span class="badge badge-sm">{{ inter.direccion }}</span>{% endif %}
+                            <small class="text-muted">{{ inter.fecha.strftime('%d/%m/%Y %H:%M') }}</small>
+                        </div>
+                        {% if inter.asunto %}<div class="timeline-asunto">{{ inter.asunto }}</div>{% endif %}
+                        <div class="timeline-desc">{{ inter.descripcion }}</div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-muted text-center">No hay interacciones registradas</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.header-actions { display: flex; gap: 0.5rem; align-items: center; }
+.badge-lg { font-size: 0.9em; padding: 0.4em 0.8em; }
+.badge-dark { background: #333; color: white; }
+.tabs { display: flex; gap: 0; border-bottom: 2px solid var(--light); margin-bottom: 1.5rem; }
+.tab-btn { padding: 0.75rem 1.5rem; border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+.tab-btn.active { border-bottom-color: var(--primary); color: var(--primary); font-weight: 500; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+.table-success { background: rgba(40, 167, 69, 0.1); }
+
+.timeline { display: flex; flex-direction: column; gap: 1rem; }
+.timeline-item { display: flex; gap: 1rem; padding: 1rem; background: var(--light); border-radius: var(--radius-sm); }
+.timeline-icon { font-size: 1.5rem; }
+.timeline-content { flex: 1; }
+.timeline-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; }
+.timeline-asunto { font-weight: 500; margin-bottom: 0.25rem; }
+.timeline-desc { color: var(--gray); font-size: 0.9em; }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Tabs
+document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    });
+});
+
+// Mostrar/ocultar secciones segun tipo de bien
+const bienTipo = document.getElementById('bien_tipo');
+const seccionVehiculo = document.getElementById('seccion_vehiculo');
+const seccionInmueble = document.getElementById('seccion_inmueble');
+
+function actualizarSecciones() {
+    const tipo = bienTipo.value;
+    seccionVehiculo.style.display = tipo === 'vehiculo' ? 'block' : 'none';
+    seccionInmueble.style.display = tipo === 'inmueble' ? 'block' : 'none';
+}
+
+bienTipo.addEventListener('change', actualizarSecciones);
+actualizarSecciones();
+</script>
+{% endblock %}

@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}Usuarios - Administración{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Gestión de Usuarios</h1>
+    <a href="{{ url_for('admin.crear_usuario') }}" class="btn btn-primary">+ Nuevo Usuario</a>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Usuario</th>
+                    <th>Rol</th>
+                    <th>Estado</th>
+                    <th>Último Acceso</th>
+                    <th>Creado</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for usuario in usuarios %}
+                <tr>
+                    <td>
+                        <strong>{{ usuario.nombre }}</strong><br>
+                        <small class="text-muted">{{ usuario.correo }}</small>
+                    </td>
+                    <td>
+                        <span class="badge badge-{{ 'primary' if usuario.rol == 'admin' else 'secondary' }}">
+                            {{ 'Administrador' if usuario.rol == 'admin' else 'Usuario' }}
+                        </span>
+                    </td>
+                    <td>
+                        {% if usuario.esta_bloqueado() %}
+                        <span class="badge badge-warning">Bloqueado</span>
+                        {% elif usuario.activo %}
+                        <span class="badge badge-success">Activo</span>
+                        {% else %}
+                        <span class="badge badge-danger">Inactivo</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {{ usuario.ultimo_acceso.strftime('%d/%m/%Y %H:%M') if usuario.ultimo_acceso else 'Nunca' }}
+                    </td>
+                    <td>{{ usuario.fecha_creacion.strftime('%d/%m/%Y') }}</td>
+                    <td class="actions-cell">
+                        <a href="{{ url_for('admin.editar_usuario', usuario_id=usuario.id) }}" class="btn btn-sm btn-outline">
+                            Editar
+                        </a>
+                        {% if usuario.esta_bloqueado() %}
+                        <form method="POST" action="{{ url_for('admin.desbloquear_usuario', usuario_id=usuario.id) }}" style="display: inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-warning">Desbloquear</button>
+                        </form>
+                        {% endif %}
+                        {% if usuario.id != current_user.id %}
+                        <form method="POST" action="{{ url_for('admin.eliminar_usuario', usuario_id=usuario.id) }}" style="display: inline;" onsubmit="return confirm('¿Eliminar este usuario? Esta acción no se puede deshacer.')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-danger">Eliminar</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

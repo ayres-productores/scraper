@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}Siniestros - {{ poliza.numero_poliza or poliza.id }} - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <a href="{{ url_for('distribucion.poliza_completa', poliza_id=poliza.id) }}" class="btn btn-sm btn-outline">&larr; Volver a la poliza</a>
+        <h1>Siniestros</h1>
+        <p class="text-muted">{{ poliza.cliente.nombre_completo }} | {{ poliza.numero_poliza or 'Sin numero' }}</p>
+    </div>
+    <div class="header-actions">
+        <a href="{{ url_for('distribucion.nuevo_siniestro', poliza_id=poliza.id) }}" class="btn btn-primary">+ Nuevo Siniestro</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        {% if siniestros %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Numero</th>
+                    <th>Fecha</th>
+                    <th>Tipo</th>
+                    <th>Descripcion</th>
+                    <th>Monto Reclamado</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sin in siniestros %}
+                <tr>
+                    <td>
+                        <strong>{{ sin.numero_siniestro or sin.id }}</strong>
+                        {% if sin.numero_siniestro_compania %}
+                        <br><small class="text-muted">Cia: {{ sin.numero_siniestro_compania }}</small>
+                        {% endif %}
+                    </td>
+                    <td>{{ sin.fecha_ocurrencia.strftime('%d/%m/%Y') }}</td>
+                    <td>{{ sin.tipo_siniestro or '-' }}</td>
+                    <td>
+                        <span class="descripcion-corta">{{ sin.descripcion[:50] }}{% if sin.descripcion|length > 50 %}...{% endif %}</span>
+                    </td>
+                    <td>${{ "%.2f"|format(sin.monto_reclamado) if sin.monto_reclamado else '-' }}</td>
+                    <td>
+                        <span class="badge {% if sin.estado == 'pagado' %}badge-success{% elif sin.estado == 'rechazado' %}badge-danger{% elif sin.estado == 'aprobado' %}badge-info{% elif sin.estado == 'cerrado' %}badge-dark{% else %}badge-warning{% endif %}">
+                            {{ sin.estado|capitalize }}
+                        </span>
+                    </td>
+                    <td>
+                        <a href="{{ url_for('distribucion.editar_siniestro', siniestro_id=sin.id) }}" class="btn btn-sm btn-outline">Ver/Editar</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <p>No hay siniestros registrados para esta poliza.</p>
+            <a href="{{ url_for('distribucion.nuevo_siniestro', poliza_id=poliza.id) }}" class="btn btn-primary">Registrar Siniestro</a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.badge-dark { background: #333; color: white; }
+.descripcion-corta { font-size: 0.9em; color: var(--gray-dark); }
+.empty-state { text-align: center; padding: 2rem; }
+</style>
+{% endblock %}

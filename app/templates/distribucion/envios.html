@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+
+{% block title %}Historial de Envíos - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Historial de Envíos</h1>
+    <a href="{{ url_for('distribucion.index') }}" class="btn btn-outline">&#8592; Volver</a>
+</div>
+
+{% set pendientes_count = envios|selectattr('estado', 'equalto', 'pendiente')|list|length %}
+{% if pendientes_count > 0 %}
+<div class="queue-status-banner" id="queue-banner">
+    <div class="queue-indicator">
+        <span class="queue-spinner"></span>
+        <span class="queue-text">Procesando envíos en segundo plano...</span>
+    </div>
+    <div class="queue-stats">
+        <span id="pendientes-count">{{ pendientes_count }}</span> mensaje(s) pendiente(s)
+    </div>
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-header">
+        <div class="filtros-envios">
+            <a href="{{ url_for('distribucion.historial_envios') }}" class="btn btn-sm {% if not estado_filtro %}btn-primary{% else %}btn-outline{% endif %}">Todos</a>
+            <a href="{{ url_for('distribucion.historial_envios', estado='enviado') }}" class="btn btn-sm {% if estado_filtro == 'enviado' %}btn-primary{% else %}btn-outline{% endif %}">Enviados</a>
+            <a href="{{ url_for('distribucion.historial_envios', estado='pendiente') }}" class="btn btn-sm {% if estado_filtro == 'pendiente' %}btn-primary{% else %}btn-outline{% endif %}">Pendientes</a>
+            <a href="{{ url_for('distribucion.historial_envios', estado='error') }}" class="btn btn-sm {% if estado_filtro == 'error' %}btn-primary{% else %}btn-outline{% endif %}">Con Error</a>
+        </div>
+    </div>
+    <div class="card-body">
+        {% if envios %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Cliente</th>
+                    <th>Teléfono</th>
+                    <th>Póliza</th>
+                    <th>Estado</th>
+                    <th>Intentos</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for envio in envios %}
+                <tr>
+                    <td>
+                        {% if envio.fecha_envio %}
+                        {{ envio.fecha_envio.strftime('%d/%m/%Y %H:%M') }}
+                        {% else %}
+                        <span class="text-muted">Pendiente</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="{{ url_for('distribucion.cliente_detalle', cliente_id=envio.cliente.id) }}">
+                            {{ envio.cliente.nombre_completo }}
+                        </a>
+                    </td>
+                    <td>{{ envio.cliente.telefono_whatsapp }}</td>
+                    <td>
+                        {% if envio.poliza %}
+                        {{ envio.poliza.tipo_seguro or 'Póliza' }}
+                        {% if envio.poliza.compania %}
+                        <br><small class="text-muted">{{ envio.poliza.compania.nombre }}</small>
+                        {% endif %}
+                        {% else %}
+                        <span class="text-muted">Mensaje directo</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge badge-{{ 'success' if envio.estado == 'enviado' else 'danger' if envio.estado == 'error' else 'warning' }}">
+                            {{ envio.estado }}
+                        </span>
+                        {% if envio.mensaje_error %}
+                        <br><small class="text-danger">{{ envio.mensaje_error[:50] }}</small>
+                        {% endif %}
+                    </td>
+                    <td>{{ envio.intentos }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <span class="empty-icon">&#128172;</span>
+            <h3>No hay envíos</h3>
+            <p>Aún no has enviado ningún mensaje por WhatsApp.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.queue-status-banner {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 1rem 1.5rem;
+    border-radius: var(--radius);
+    margin-bottom: 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    animation: pulse-subtle 2s infinite;
+}
+
+@keyframes pulse-subtle {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.9; }
+}
+
+.queue-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.queue-spinner {
+    width: 20px;
+    height: 20px;
+    border: 3px solid rgba(255,255,255,0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.queue-stats {
+    font-weight: 500;
+}
+
+.filtros-envios {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.badge-warning {
+    animation: pulse-badge 1.5s infinite;
+}
+
+@keyframes pulse-badge {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+tr.envio-pendiente {
+    background-color: rgba(255, 193, 7, 0.1);
+}
+
+tr.envio-nuevo {
+    animation: fadeIn 0.5s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; background-color: rgba(102, 126, 234, 0.2); }
+    to { opacity: 1; }
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+{% set pendientes_count = envios|selectattr('estado', 'equalto', 'pendiente')|list|length %}
+{% if pendientes_count > 0 %}
+<script>
+// Auto-refresh cuando hay envíos pendientes
+setInterval(function() {
+    fetch('{{ url_for("distribucion.estado_cola") }}')
+        .then(response => response.json())
+        .then(data => {
+            var countEl = document.getElementById('pendientes-count');
+            if (countEl) {
+                countEl.textContent = data.pendientes;
+            }
+
+            if (data.pendientes === 0) {
+                // Recargar para mostrar envíos completados
+                setTimeout(() => location.reload(), 1000);
+            }
+        })
+        .catch(err => console.log('Error actualizando estado:', err));
+}, 5000);
+</script>
+{% endif %}
+{% endblock %}

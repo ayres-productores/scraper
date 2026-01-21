@@ -1,0 +1,862 @@
+================================================================================
+                    DOCUMENTACION DEL SISTEMA
+                    PORTAL DE SEGUROS - CRM
+================================================================================
+
+Fecha de Generacion: Enero 2026
+Version: 1.0
+
+================================================================================
+                         INDICE
+================================================================================
+
+1. DESCRIPCION GENERAL
+2. ARQUITECTURA DEL SISTEMA
+3. ESTRUCTURA DE ARCHIVOS
+4. MODELOS DE BASE DE DATOS
+5. MODULOS FUNCIONALES
+   5.1 Modulo de Autenticacion
+   5.2 Modulo Extractor de Correos
+   5.3 Modulo de Distribucion (CRM)
+   5.4 Interprete de Polizas PDF
+   5.5 Visor de Archivos PDF
+6. RUTAS Y ENDPOINTS
+7. PLANTILLAS HTML
+8. CONFIGURACION Y DESPLIEGUE
+9. CREDENCIALES POR DEFECTO
+10. REGISTRO DE CAMBIOS
+
+================================================================================
+                    1. DESCRIPCION GENERAL
+================================================================================
+
+El Portal de Seguros es un sistema de gestion integral para productores de
+seguros que permite:
+
+- Extraer automaticamente polizas desde correos electronicos (Gmail)
+- Interpretar y procesar documentos PDF de polizas
+- Gestionar clientes y sus polizas
+- Llevar un historial de interacciones (CRM)
+- Controlar pagos y vencimientos
+- Generar alertas automaticas
+
+Tecnologias utilizadas:
+- Backend: Python 3.x con Flask
+- Base de datos: SQLite (desarrollo) / PostgreSQL (produccion)
+- Frontend: HTML5, CSS3, JavaScript vanilla
+- Plantillas: Jinja2
+- Extraccion PDF: PyMuPDF (fitz)
+
+================================================================================
+                    2. ARQUITECTURA DEL SISTEMA
+================================================================================
+
+El sistema sigue una arquitectura MVC (Modelo-Vista-Controlador) implementada
+con Flask Blueprints para modularizacion:
+
+    portal_seguros/
+    |
+    +-- app/
+    |   +-- __init__.py          # Fabrica de aplicacion Flask
+    |   +-- models.py            # Modelos SQLAlchemy
+    |   |
+    |   +-- main/                # Blueprint principal
+    |   |   +-- routes.py
+    |   |
+    |   +-- auth/                # Blueprint autenticacion
+    |   |   +-- routes.py
+    |   |   +-- forms.py
+    |   |
+    |   +-- extractor/           # Blueprint extractor de correos
+    |   |   +-- routes.py
+    |   |   +-- forms.py
+    |   |   +-- motor.py         # Motor de escaneo IMAP
+    |   |   +-- pdf_parser.py    # Extractor de datos de PDF
+    |   |
+    |   +-- distribucion/        # Blueprint CRM/Distribucion
+    |   |   +-- routes.py
+    |   |   +-- forms.py
+    |   |
+    |   +-- templates/           # Plantillas HTML
+    |   +-- static/              # Archivos estaticos (CSS, JS)
+    |
+    +-- run.py                   # Punto de entrada
+    +-- config.py                # Configuracion
+
+================================================================================
+                    3. ESTRUCTURA DE ARCHIVOS
+================================================================================
+
+ARCHIVOS PRINCIPALES:
+---------------------
+
+run.py
+    Punto de entrada de la aplicacion. Inicia el servidor Flask.
+
+config.py
+    Configuracion de la aplicacion (claves secretas, base de datos, etc.)
+
+app/__init__.py
+    Fabrica de la aplicacion Flask. Registra blueprints y extensiones.
+
+app/models.py
+    Definicion de todos los modelos de base de datos.
+
+
+BLUEPRINTS:
+-----------
+
+app/main/routes.py
+    Rutas principales: dashboard, vista de archivos, visor PDF.
+
+app/auth/routes.py
+    Autenticacion: login, logout, registro, gestion de usuarios.
+
+app/extractor/routes.py
+    Extraccion de correos: configuracion, escaneo, detencion, historial.
+
+app/extractor/motor.py
+    Motor de escaneo IMAP para Gmail. Maneja conexion y descarga.
+
+app/extractor/pdf_parser.py
+    Clase ExtractorDatosPoliza para extraer datos de PDFs.
+
+app/distribucion/routes.py
+    CRM completo: clientes, polizas, interacciones, pagos, alertas.
+
+
+PLANTILLAS:
+-----------
+
+app/templates/base.html
+    Plantilla base con estructura HTML, navegacion y estilos globales.
+
+app/templates/main/
+    - dashboard.html         # Panel principal
+    - archivos.html          # Lista de archivos con visor PDF modal
+
+app/templates/extractor/
+    - index.html             # Panel de extraccion de correos
+
+app/templates/distribucion/
+    - index.html             # Dashboard de distribucion
+    - clientes.html          # Lista de clientes
+    - cliente_detalle.html   # Detalle de cliente
+    - cliente_form.html      # Formulario cliente
+    - polizas.html           # Lista de polizas
+    - poliza_completa.html   # Formulario completo de poliza
+    - interprete_pdf.html    # Panel interprete de PDFs
+    - extraer_pdf.html       # Formulario extraccion/edicion
+    - comparar_extraccion.html # Comparacion de datos
+    - interacciones.html     # Historial CRM
+    - pagos.html             # Gestion de pagos
+    - alertas.html           # Panel de alertas
+
+================================================================================
+                    4. MODELOS DE BASE DE DATOS
+================================================================================
+
+USUARIO
+-------
+Tabla: usuarios
+
+    id                  INTEGER PRIMARY KEY
+    email               VARCHAR(120) UNIQUE NOT NULL
+    password_hash       VARCHAR(255) NOT NULL
+    nombre              VARCHAR(100)
+    rol                 VARCHAR(20) DEFAULT 'usuario'
+    activo              BOOLEAN DEFAULT TRUE
+    fecha_creacion      DATETIME
+    ultimo_acceso       DATETIME
+
+
+CUENTA EMAIL
+------------
+Tabla: cuentas_email
+
+    id                  INTEGER PRIMARY KEY
+    usuario_id          INTEGER FK -> usuarios.id
+    correo_gmail        VARCHAR(120) NOT NULL
+    contrasena_app      VARCHAR(255) (encriptada)
+    activa              BOOLEAN DEFAULT TRUE
+    fecha_agregada      DATETIME
+
+
+ESCANEO
+-------
+Tabla: escaneos
+
+    id                  INTEGER PRIMARY KEY
+    usuario_id          INTEGER FK -> usuarios.id
+    estado              VARCHAR(20)  # pendiente, en_progreso, completado, cancelado
+    fecha_inicio        DATETIME
+    fecha_fin           DATETIME
+    cuenta_actual       VARCHAR(120)
+    total_correos       INTEGER DEFAULT 0
+    correos_procesados  INTEGER DEFAULT 0
+    archivos_descargados INTEGER DEFAULT 0
+
+
+ARCHIVO DESCARGADO
+------------------
+Tabla: archivos_descargados
+
+    id                  INTEGER PRIMARY KEY
+    escaneo_id          INTEGER FK -> escaneos.id
+    nombre_archivo      VARCHAR(255)
+    ruta_archivo        VARCHAR(500)
+    tamano_bytes        INTEGER
+    tipo_mime           VARCHAR(100)
+    fecha_correo        DATETIME
+    remitente           VARCHAR(255)
+    asunto_correo       VARCHAR(500)
+    compania_id         INTEGER FK -> companias.id
+    procesado           BOOLEAN DEFAULT FALSE
+    fecha_descarga      DATETIME
+
+
+COMPANIA ASEGURADORA
+--------------------
+Tabla: companias
+
+    id                  INTEGER PRIMARY KEY
+    nombre              VARCHAR(100) NOT NULL
+    codigo              VARCHAR(20)
+    email_dominio       VARCHAR(100)
+    activa              BOOLEAN DEFAULT TRUE
+
+
+CLIENTE
+-------
+Tabla: clientes
+
+    id                  INTEGER PRIMARY KEY
+    usuario_id          INTEGER FK -> usuarios.id
+    nombre_completo     VARCHAR(150) NOT NULL
+    tipo_documento      VARCHAR(20)
+    numero_documento    VARCHAR(30)
+    email               VARCHAR(120)
+    telefono            VARCHAR(30)
+    direccion           VARCHAR(255)
+    ciudad              VARCHAR(100)
+    codigo_postal       VARCHAR(20)
+    fecha_nacimiento    DATE
+    notas               TEXT
+    activo              BOOLEAN DEFAULT TRUE
+    fecha_creacion      DATETIME
+
+
+POLIZA CLIENTE
+--------------
+Tabla: polizas_cliente
+
+    id                      INTEGER PRIMARY KEY
+    cliente_id              INTEGER FK -> clientes.id
+    compania_id             INTEGER FK -> companias.id
+    archivo_id              INTEGER FK -> archivos_descargados.id
+
+    # Datos basicos de poliza
+    numero_poliza           VARCHAR(50)
+    tipo_seguro             VARCHAR(50)
+    fecha_vigencia_desde    DATE
+    fecha_vigencia_hasta    DATE
+    prima_anual             DECIMAL(12,2)
+
+    # Datos del asegurado
+    asegurado_nombre        VARCHAR(150)
+    asegurado_documento     VARCHAR(30)
+    asegurado_direccion     VARCHAR(255)
+
+    # Bien asegurado
+    bien_asegurado_tipo     VARCHAR(50)  # vehiculo, inmueble, persona
+    bien_asegurado_descripcion TEXT
+    bien_asegurado_valor    DECIMAL(12,2)
+
+    # Datos de vehiculo
+    vehiculo_marca          VARCHAR(50)
+    vehiculo_modelo         VARCHAR(50)
+    vehiculo_anio           INTEGER
+    vehiculo_patente        VARCHAR(20)
+    vehiculo_chasis         VARCHAR(50)
+
+    # Coberturas
+    coberturas              TEXT  # JSON
+    suma_asegurada          DECIMAL(12,2)
+    deducible               DECIMAL(10,2)
+    franquicia              DECIMAL(10,2)
+
+    # Estado
+    estado                  VARCHAR(20) DEFAULT 'activa'
+    renovacion_automatica   BOOLEAN DEFAULT FALSE
+    poliza_anterior_id      INTEGER FK -> polizas_cliente.id
+
+    # Forma de pago
+    forma_pago              VARCHAR(20)
+    cantidad_cuotas         INTEGER
+    dia_vencimiento_cuota   INTEGER
+
+    # Contacto productor
+    productor_nombre        VARCHAR(100)
+    productor_telefono      VARCHAR(30)
+    productor_email         VARCHAR(120)
+
+    # Datos de extraccion
+    datos_extraidos         TEXT  # JSON raw
+    confianza_extraccion    FLOAT  # 0-1
+    requiere_revision       BOOLEAN DEFAULT FALSE
+
+    fecha_creacion          DATETIME
+    fecha_actualizacion     DATETIME
+
+
+PAGO
+----
+Tabla: pagos
+
+    id                  INTEGER PRIMARY KEY
+    poliza_cliente_id   INTEGER FK -> polizas_cliente.id
+    numero_cuota        INTEGER
+    monto               DECIMAL(10,2)
+    fecha_vencimiento   DATE
+    fecha_pago          DATE
+    estado              VARCHAR(20)  # pendiente, pagado, vencido, anulado
+    metodo_pago         VARCHAR(30)
+    comprobante         VARCHAR(100)
+    notas               TEXT
+    fecha_registro      DATETIME
+
+
+INTERACCION
+-----------
+Tabla: interacciones
+
+    id                  INTEGER PRIMARY KEY
+    cliente_id          INTEGER FK -> clientes.id
+    poliza_cliente_id   INTEGER FK -> polizas_cliente.id (nullable)
+    usuario_id          INTEGER FK -> usuarios.id
+    tipo                VARCHAR(30)  # llamada, email, whatsapp, reunion, nota
+    direccion           VARCHAR(20)  # entrante, saliente
+    asunto              VARCHAR(200)
+    descripcion         TEXT
+    fecha               DATETIME
+    duracion_minutos    INTEGER
+    requiere_seguimiento BOOLEAN DEFAULT FALSE
+    fecha_seguimiento   DATE
+    seguimiento_completado BOOLEAN DEFAULT FALSE
+
+
+ALERTA VENCIMIENTO
+------------------
+Tabla: alertas_vencimiento
+
+    id                  INTEGER PRIMARY KEY
+    poliza_cliente_id   INTEGER FK -> polizas_cliente.id
+    tipo                VARCHAR(30)  # vencimiento_poliza, vencimiento_pago, renovacion
+    fecha_alerta        DATE
+    dias_anticipacion   INTEGER
+    estado              VARCHAR(20)  # pendiente, notificada, descartada, resuelta
+    fecha_notificacion  DATETIME
+    mensaje             TEXT
+
+
+SINIESTRO
+---------
+Tabla: siniestros
+
+    id                  INTEGER PRIMARY KEY
+    poliza_cliente_id   INTEGER FK -> polizas_cliente.id
+    numero_siniestro    VARCHAR(50)
+    fecha_ocurrencia    DATE
+    fecha_denuncia      DATE
+    descripcion         TEXT
+    ubicacion           VARCHAR(255)
+    monto_reclamado     DECIMAL(12,2)
+    monto_aprobado      DECIMAL(12,2)
+    estado              VARCHAR(30)  # denunciado, en_proceso, aprobado, rechazado, pagado
+    fecha_resolucion    DATE
+    notas               TEXT
+
+================================================================================
+                    5. MODULOS FUNCIONALES
+================================================================================
+
+5.1 MODULO DE AUTENTICACION
+---------------------------
+
+Ubicacion: app/auth/
+
+Funcionalidades:
+- Login con email y contrasena
+- Logout con limpieza de sesion
+- Registro de nuevos usuarios
+- Gestion de roles (admin, usuario)
+- Proteccion de rutas con @login_required
+
+Rutas:
+    /auth/login          GET, POST   Formulario de inicio de sesion
+    /auth/logout         GET         Cerrar sesion
+    /auth/registro       GET, POST   Registro de usuario
+
+
+5.2 MODULO EXTRACTOR DE CORREOS
+-------------------------------
+
+Ubicacion: app/extractor/
+
+Funcionalidades:
+- Configuracion de cuentas Gmail
+- Escaneo automatico de correos con adjuntos PDF
+- Descarga y almacenamiento de archivos
+- Deteccion automatica de compania aseguradora
+- Control de proceso (iniciar, detener, reiniciar)
+- Historial de escaneos
+
+Componentes:
+
+    motor.py - MotorEscaneo
+        Clase que maneja la conexion IMAP a Gmail y la descarga de archivos.
+
+        Metodos principales:
+        - iniciar(): Inicia el escaneo en un hilo separado
+        - detener(): Detiene el escaneo de forma segura
+        - _escanear_cuenta(): Procesa una cuenta de correo
+        - _procesar_mensaje(): Extrae adjuntos de un mensaje
+        - _detectar_compania(): Identifica la aseguradora por remitente
+
+    pdf_parser.py - ExtractorDatosPoliza
+        Clase que extrae datos estructurados de archivos PDF.
+
+        Metodos principales:
+        - extraer_datos(ruta_pdf): Extrae todos los datos del PDF
+        - detectar_compania(texto): Identifica compania aseguradora
+        - extraer_numero_poliza(texto): Busca numero de poliza
+        - extraer_fechas_vigencia(texto): Extrae fechas desde/hasta
+        - extraer_prima(texto): Extrae monto de prima
+        - extraer_datos_vehiculo(texto): Extrae datos de vehiculo
+        - extraer_datos_asegurado(texto): Extrae datos del asegurado
+        - calcular_confianza(datos): Calcula nivel de confianza 0-1
+
+Rutas:
+    /extractor/                 GET         Panel principal
+    /extractor/iniciar          POST        Iniciar escaneo
+    /extractor/detener/<id>     POST        Detener escaneo
+    /extractor/estado/<id>      GET         Estado del escaneo (JSON)
+    /extractor/historial        GET         Historial de escaneos
+
+
+5.3 MODULO DE DISTRIBUCION (CRM)
+--------------------------------
+
+Ubicacion: app/distribucion/
+
+Funcionalidades:
+- Gestion completa de clientes
+- Gestion de polizas con datos completos
+- Historial de interacciones (llamadas, emails, reuniones)
+- Control de pagos y cuotas
+- Alertas de vencimiento
+- Gestion de siniestros
+- Dashboard con estadisticas
+
+Rutas Clientes:
+    /distribucion/                          GET         Dashboard
+    /distribucion/clientes                  GET         Lista de clientes
+    /distribucion/clientes/nuevo            GET, POST   Crear cliente
+    /distribucion/clientes/<id>             GET         Detalle cliente
+    /distribucion/clientes/<id>/editar      GET, POST   Editar cliente
+
+Rutas Polizas:
+    /distribucion/polizas                   GET         Lista de polizas
+    /distribucion/poliza/<id>               GET         Ver poliza completa
+    /distribucion/poliza/<id>/editar        GET, POST   Editar poliza
+    /distribucion/poliza/nueva/<cliente_id> GET, POST   Nueva poliza
+
+Rutas Interacciones:
+    /distribucion/clientes/<id>/interacciones       GET         Lista
+    /distribucion/clientes/<id>/interacciones/nueva GET, POST   Nueva
+
+Rutas Pagos:
+    /distribucion/poliza/<id>/pagos                 GET         Lista pagos
+    /distribucion/poliza/<id>/pagos/registrar       GET, POST   Registrar pago
+    /distribucion/pagos/pendientes                  GET         Pagos pendientes
+
+Rutas Alertas:
+    /distribucion/alertas                   GET         Panel alertas
+    /distribucion/alertas/configurar        GET, POST   Configurar
+
+Rutas Siniestros:
+    /distribucion/poliza/<id>/siniestros            GET         Lista
+    /distribucion/poliza/<id>/siniestros/nuevo      GET, POST   Nuevo
+
+
+5.4 INTERPRETE DE POLIZAS PDF
+-----------------------------
+
+Ubicacion: app/distribucion/routes.py (rutas interprete_pdf)
+           app/extractor/pdf_parser.py (extraccion)
+
+Funcionalidades:
+- Lista PDFs pendientes de procesar
+- Extraccion automatica de datos con regex
+- Formulario de revision y edicion
+- Vista dividida: formulario + preview PDF
+- Indicador de confianza de extraccion
+- Procesamiento por lotes
+- Re-extraccion y comparacion de datos
+- Deteccion de polizas duplicadas
+
+Flujo de trabajo:
+1. Usuario accede al panel de interprete
+2. Selecciona un PDF pendiente para procesar
+3. Sistema extrae datos automaticamente
+4. Usuario revisa y corrige en formulario
+5. Usuario guarda, creando/actualizando poliza
+6. PDF se marca como procesado
+
+Rutas:
+    /distribucion/interprete-pdf                    GET         Panel principal
+    /distribucion/interprete-pdf/extraer/<id>       GET, POST   Extraer/editar
+    /distribucion/interprete-pdf/guardar/<id>       POST        Guardar datos
+    /distribucion/interprete-pdf/lote               POST        Procesar lote
+    /distribucion/interprete-pdf/reextraer/<id>     GET         Re-extraer
+    /distribucion/interprete-pdf/comparar/<id>      GET         Comparar datos
+
+
+5.5 VISOR DE ARCHIVOS PDF
+-------------------------
+
+Ubicacion: app/main/routes.py
+           app/templates/main/archivos.html
+
+Funcionalidades:
+- Lista de archivos descargados con filtros
+- Visor PDF en modal overlay (sin cambio de pagina)
+- Preview en iframe embebido
+- Controles de cerrar con click fuera o tecla ESC
+
+Implementacion:
+- Ruta /archivos/ver/<id> sirve el PDF con Content-Type application/pdf
+- Modal con iframe carga el PDF inline
+- JavaScript maneja apertura/cierre del modal
+
+Rutas:
+    /archivos                   GET         Lista de archivos
+    /archivos/ver/<id>          GET         Servir PDF para visualizacion
+
+================================================================================
+                    6. RUTAS Y ENDPOINTS
+================================================================================
+
+RUTAS PRINCIPALES
+-----------------
+GET  /                                      Dashboard principal
+GET  /archivos                              Lista de archivos descargados
+GET  /archivos/ver/<id>                     Visor de PDF (inline)
+
+RUTAS AUTENTICACION
+-------------------
+GET  /auth/login                            Formulario login
+POST /auth/login                            Procesar login
+GET  /auth/logout                           Cerrar sesion
+GET  /auth/registro                         Formulario registro
+POST /auth/registro                         Procesar registro
+
+RUTAS EXTRACTOR
+---------------
+GET  /extractor/                            Panel extractor
+POST /extractor/iniciar                     Iniciar escaneo
+POST /extractor/detener/<escaneo_id>        Detener escaneo
+GET  /extractor/estado/<escaneo_id>         Estado JSON
+GET  /extractor/historial                   Historial
+
+RUTAS DISTRIBUCION - CLIENTES
+-----------------------------
+GET  /distribucion/                         Dashboard CRM
+GET  /distribucion/clientes                 Lista clientes
+GET  /distribucion/clientes/nuevo           Form nuevo cliente
+POST /distribucion/clientes/nuevo           Crear cliente
+GET  /distribucion/clientes/<id>            Detalle cliente
+GET  /distribucion/clientes/<id>/editar     Form editar cliente
+POST /distribucion/clientes/<id>/editar     Actualizar cliente
+
+RUTAS DISTRIBUCION - POLIZAS
+----------------------------
+GET  /distribucion/polizas                  Lista polizas
+GET  /distribucion/poliza/<id>              Ver poliza completa
+GET  /distribucion/poliza/<id>/editar       Form editar poliza
+POST /distribucion/poliza/<id>/editar       Actualizar poliza
+GET  /distribucion/poliza/nueva/<cliente_id> Form nueva poliza
+POST /distribucion/poliza/nueva/<cliente_id> Crear poliza
+
+RUTAS DISTRIBUCION - INTERPRETE PDF
+-----------------------------------
+GET  /distribucion/interprete-pdf                   Panel interprete
+GET  /distribucion/interprete-pdf/extraer/<id>      Vista extraccion
+POST /distribucion/interprete-pdf/guardar/<id>      Guardar datos
+POST /distribucion/interprete-pdf/lote              Procesar lote
+GET  /distribucion/interprete-pdf/reextraer/<id>    Re-extraer PDF
+GET  /distribucion/interprete-pdf/comparar/<id>     Comparar datos
+
+RUTAS DISTRIBUCION - INTERACCIONES
+----------------------------------
+GET  /distribucion/clientes/<id>/interacciones         Lista interacciones
+GET  /distribucion/clientes/<id>/interacciones/nueva   Form nueva
+POST /distribucion/clientes/<id>/interacciones/nueva   Crear interaccion
+
+RUTAS DISTRIBUCION - PAGOS
+--------------------------
+GET  /distribucion/poliza/<id>/pagos                Lista pagos
+GET  /distribucion/poliza/<id>/pagos/registrar      Form registrar pago
+POST /distribucion/poliza/<id>/pagos/registrar      Crear pago
+GET  /distribucion/pagos/pendientes                 Pagos pendientes
+
+RUTAS DISTRIBUCION - ALERTAS
+----------------------------
+GET  /distribucion/alertas                  Panel alertas
+GET  /distribucion/alertas/configurar       Form configuracion
+POST /distribucion/alertas/configurar       Guardar configuracion
+
+RUTAS DISTRIBUCION - SINIESTROS
+-------------------------------
+GET  /distribucion/poliza/<id>/siniestros           Lista siniestros
+GET  /distribucion/poliza/<id>/siniestros/nuevo     Form nuevo
+POST /distribucion/poliza/<id>/siniestros/nuevo     Crear siniestro
+
+================================================================================
+                    7. PLANTILLAS HTML
+================================================================================
+
+PLANTILLA BASE
+--------------
+app/templates/base.html
+
+    Estructura comun para todas las paginas:
+    - DOCTYPE y meta tags
+    - Barra de navegacion principal
+    - Menu lateral (si aplica)
+    - Area de contenido ({% block content %})
+    - Footer
+    - Estilos CSS globales
+    - Scripts JavaScript globales
+    - Bloques para CSS/JS adicional
+
+
+PLANTILLAS PRINCIPALES
+----------------------
+app/templates/main/dashboard.html
+    Panel principal con estadisticas y resumen.
+    - Total de polizas activas
+    - Polizas por vencer
+    - Pagos pendientes
+    - Ultimas actividades
+
+app/templates/main/archivos.html
+    Lista de archivos descargados con visor PDF modal.
+    - Tabla con nombre, compania, fecha, tamano
+    - Filtros por compania y fecha
+    - Modal overlay para visualizacion PDF
+    - JavaScript para abrir/cerrar modal
+
+
+PLANTILLAS EXTRACTOR
+--------------------
+app/templates/extractor/index.html
+    Panel de extraccion de correos.
+    - Formulario de credenciales Gmail
+    - Boton iniciar/detener escaneo
+    - Boton resetear
+    - Indicador de progreso
+    - Lista de cuentas configuradas
+    - Estadisticas del escaneo actual
+
+
+PLANTILLAS DISTRIBUCION
+-----------------------
+app/templates/distribucion/index.html
+    Dashboard CRM con estadisticas.
+
+app/templates/distribucion/clientes.html
+    Lista de clientes con busqueda.
+
+app/templates/distribucion/cliente_detalle.html
+    Detalle completo de cliente con polizas e interacciones.
+
+app/templates/distribucion/cliente_form.html
+    Formulario crear/editar cliente.
+
+app/templates/distribucion/polizas.html
+    Lista de todas las polizas.
+
+app/templates/distribucion/poliza_completa.html
+    Formulario completo de poliza con todas las secciones.
+
+app/templates/distribucion/interprete_pdf.html
+    Panel del interprete de PDFs.
+    - Estadisticas: total, pendientes, procesados, requieren revision
+    - Tabla de PDFs pendientes con boton "Procesar"
+    - Tabla de PDFs procesados con indicador de confianza
+    - Formulario de procesamiento por lotes
+
+app/templates/distribucion/extraer_pdf.html
+    Formulario de extraccion/edicion de datos.
+    - Vista dividida: formulario izquierda, PDF derecha
+    - Indicador de confianza de extraccion
+    - Secciones: Poliza, Asegurado, Vehiculo, Pago, Productor
+    - Botones: Guardar, Guardar y Continuar, Cancelar
+    - Manejo de polizas existentes
+
+app/templates/distribucion/comparar_extraccion.html
+    Comparacion lado a lado de datos.
+    - Tabla con valor actual vs re-extraido
+    - Resaltado de diferencias
+    - Indicador de confianza
+    - Acciones: Editar, Ver poliza, Volver
+
+app/templates/distribucion/interacciones.html
+    Historial de interacciones con cliente.
+
+app/templates/distribucion/interaccion_form.html
+    Formulario nueva interaccion.
+
+app/templates/distribucion/pagos.html
+    Lista de pagos de una poliza.
+
+app/templates/distribucion/pago_form.html
+    Formulario registrar pago.
+
+app/templates/distribucion/pagos_pendientes.html
+    Lista global de pagos pendientes.
+
+app/templates/distribucion/alertas.html
+    Panel de alertas de vencimiento.
+
+app/templates/distribucion/siniestros.html
+    Lista de siniestros de una poliza.
+
+app/templates/distribucion/siniestro_form.html
+    Formulario nuevo siniestro.
+
+================================================================================
+                    8. CONFIGURACION Y DESPLIEGUE
+================================================================================
+
+REQUISITOS
+----------
+- Python 3.8 o superior
+- pip (gestor de paquetes Python)
+- Navegador web moderno
+
+DEPENDENCIAS PYTHON
+-------------------
+Flask>=2.0
+Flask-SQLAlchemy>=3.0
+Flask-Login>=0.6
+Flask-WTF>=1.0
+Werkzeug>=2.0
+PyMuPDF>=1.21 (fitz)
+python-dotenv>=0.19
+
+INSTALACION
+-----------
+1. Clonar o descargar el proyecto
+2. Crear entorno virtual:
+   python -m venv venv
+
+3. Activar entorno virtual:
+   Windows: venv\Scripts\activate
+   Linux/Mac: source venv/bin/activate
+
+4. Instalar dependencias:
+   pip install -r requirements.txt
+
+5. Inicializar base de datos:
+   flask db upgrade
+   (o ejecutar run.py que crea las tablas automaticamente)
+
+EJECUCION EN DESARROLLO
+-----------------------
+python run.py
+
+El servidor iniciara en: http://127.0.0.1:5000
+
+VARIABLES DE ENTORNO
+--------------------
+SECRET_KEY          Clave secreta para sesiones (obligatorio en produccion)
+DATABASE_URL        URL de conexion a base de datos
+FLASK_ENV           development o production
+UPLOAD_FOLDER       Carpeta para archivos subidos/descargados
+
+ESTRUCTURA DE CARPETAS DE DATOS
+-------------------------------
+portal_seguros/
++-- uploads/                    Archivos subidos manualmente
++-- downloads/                  PDFs descargados de correos
+    +-- <usuario_id>/
+        +-- <escaneo_id>/
+            +-- archivo1.pdf
+            +-- archivo2.pdf
+
+================================================================================
+                    9. CREDENCIALES POR DEFECTO
+================================================================================
+
+ACCESO AL SISTEMA
+-----------------
+URL:        http://127.0.0.1:5000
+Usuario:    admin@empresa.com
+Contrasena: CambiarEnPrimerLogin123!
+
+IMPORTANTE: Cambiar estas credenciales inmediatamente en produccion.
+
+CONFIGURACION GMAIL
+-------------------
+Para usar el extractor de correos se requiere:
+1. Cuenta Gmail
+2. Contrasena de aplicacion (no la contrasena normal)
+3. IMAP habilitado en la cuenta
+
+Pasos para obtener contrasena de aplicacion:
+1. Ir a myaccount.google.com
+2. Seguridad > Verificacion en dos pasos (activar)
+3. Seguridad > Contrasenas de aplicaciones
+4. Generar nueva contrasena para "Correo" en "Otro dispositivo"
+5. Usar esa contrasena de 16 caracteres en el sistema
+
+================================================================================
+                    10. REGISTRO DE CAMBIOS
+================================================================================
+
+VERSION 1.0 - Enero 2026
+------------------------
+
+Funcionalidades implementadas:
+
+[+] Sistema de autenticacion con Flask-Login
+[+] Extractor automatico de correos Gmail via IMAP
+[+] Descarga y almacenamiento de PDFs adjuntos
+[+] Deteccion automatica de compania aseguradora
+[+] Panel de control de escaneo con inicio/detencion/reinicio
+[+] Visor de archivos PDF en modal overlay
+[+] Modulo CRM completo (clientes, polizas, interacciones)
+[+] Interprete de polizas PDF con extraccion automatica
+[+] Formulario de revision y edicion de datos extraidos
+[+] Procesamiento por lotes de multiples PDFs
+[+] Re-extraccion y comparacion de datos
+[+] Indicador de confianza de extraccion
+[+] Gestion de pagos y cuotas
+[+] Sistema de alertas de vencimiento
+[+] Gestion de siniestros
+
+Correcciones aplicadas:
+
+[*] Formulario extractor no guarda credenciales (autocomplete off)
+[*] Sincronizacion frontend/backend al detener escaneo
+[*] Limpieza de escaneos huerfanos al cargar pagina
+[*] Boton resetear siempre accesible en panel extractor
+
+================================================================================
+                    FIN DE DOCUMENTACION
+================================================================================
+
+Generado automaticamente desde sesion de desarrollo.
+Para consultas tecnicas, revisar el codigo fuente directamente.

@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}Interacciones - {{ cliente.nombre_completo }} - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <a href="{{ url_for('distribucion.cliente_detalle', cliente_id=cliente.id) }}" class="btn btn-sm btn-outline">&larr; Volver al cliente</a>
+        <h1>Historial de Interacciones</h1>
+        <p class="text-muted">{{ cliente.nombre_completo }}</p>
+    </div>
+    <div class="header-actions">
+        <a href="{{ url_for('distribucion.nueva_interaccion', cliente_id=cliente.id) }}" class="btn btn-primary">+ Nueva Interaccion</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        {% if interacciones %}
+        <div class="timeline">
+            {% for inter in interacciones %}
+            <div class="timeline-item {% if inter.requiere_seguimiento and not inter.seguimiento_completado %}timeline-seguimiento{% endif %}">
+                <div class="timeline-date">
+                    <span class="fecha">{{ inter.fecha.strftime('%d/%m/%Y') }}</span>
+                    <span class="hora">{{ inter.fecha.strftime('%H:%M') }}</span>
+                </div>
+                <div class="timeline-icon">
+                    {% if inter.tipo == 'llamada' %}&#128222;
+                    {% elif inter.tipo == 'email' %}&#128231;
+                    {% elif inter.tipo == 'whatsapp' %}&#128172;
+                    {% elif inter.tipo == 'reunion' %}&#128197;
+                    {% elif inter.tipo == 'visita' %}&#128694;
+                    {% else %}&#128221;{% endif %}
+                </div>
+                <div class="timeline-content">
+                    <div class="timeline-header">
+                        <strong>{{ inter.tipo|capitalize }}</strong>
+                        {% if inter.direccion %}
+                        <span class="badge badge-sm {% if inter.direccion == 'entrante' %}badge-info{% else %}badge-success{% endif %}">
+                            {{ inter.direccion }}
+                        </span>
+                        {% endif %}
+                        {% if inter.duracion_minutos %}
+                        <span class="badge badge-sm badge-light">{{ inter.duracion_minutos }} min</span>
+                        {% endif %}
+                        {% if inter.poliza %}
+                        <span class="badge badge-sm badge-light">Poliza: {{ inter.poliza.numero_poliza or inter.poliza.id }}</span>
+                        {% endif %}
+                    </div>
+                    {% if inter.asunto %}
+                    <div class="timeline-asunto">{{ inter.asunto }}</div>
+                    {% endif %}
+                    <div class="timeline-desc">{{ inter.descripcion }}</div>
+
+                    {% if inter.requiere_seguimiento %}
+                    <div class="seguimiento-info mt-2">
+                        {% if inter.seguimiento_completado %}
+                        <span class="badge badge-success">&#10004; Seguimiento completado</span>
+                        {% if inter.notas_seguimiento %}
+                        <p class="notas-seguimiento">{{ inter.notas_seguimiento }}</p>
+                        {% endif %}
+                        {% else %}
+                        <span class="badge badge-warning">Seguimiento pendiente</span>
+                        {% if inter.fecha_seguimiento %}
+                        <span class="text-muted"> - {{ inter.fecha_seguimiento.strftime('%d/%m/%Y') }}</span>
+                        {% endif %}
+                        <form action="{{ url_for('distribucion.completar_seguimiento', interaccion_id=inter.id) }}" method="POST" class="seguimiento-form">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="text" name="notas" placeholder="Notas del seguimiento..." class="form-control form-control-sm">
+                            <button type="submit" class="btn btn-sm btn-success">Completar</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <p>No hay interacciones registradas con este cliente.</p>
+            <a href="{{ url_for('distribucion.nueva_interaccion', cliente_id=cliente.id) }}" class="btn btn-primary">Registrar primera interaccion</a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.timeline { display: flex; flex-direction: column; gap: 0; }
+.timeline-item {
+    display: flex;
+    gap: 1rem;
+    padding: 1.5rem;
+    border-left: 3px solid var(--light);
+    position: relative;
+}
+.timeline-item:hover { background: var(--light); }
+.timeline-seguimiento { border-left-color: var(--warning); }
+.timeline-date {
+    min-width: 80px;
+    text-align: right;
+    display: flex;
+    flex-direction: column;
+}
+.timeline-date .fecha { font-weight: 500; }
+.timeline-date .hora { font-size: 0.85em; color: var(--gray); }
+.timeline-icon {
+    font-size: 1.5rem;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--light);
+    border-radius: 50%;
+}
+.timeline-content { flex: 1; }
+.timeline-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; flex-wrap: wrap; }
+.timeline-asunto { font-weight: 500; margin-bottom: 0.25rem; }
+.timeline-desc { color: var(--gray-dark); white-space: pre-wrap; }
+.badge-sm { font-size: 0.75em; padding: 0.2em 0.5em; }
+.badge-light { background: var(--light); color: var(--dark); }
+.seguimiento-info { padding: 0.75rem; background: rgba(255, 193, 7, 0.1); border-radius: var(--radius-sm); }
+.seguimiento-form { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+.seguimiento-form input { flex: 1; }
+.notas-seguimiento { margin: 0.5rem 0 0; font-style: italic; color: var(--gray); }
+.empty-state { text-align: center; padding: 2rem; }
+</style>
+{% endblock %}

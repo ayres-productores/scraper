@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cambiar Contraseña - Portal de Seguros</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body class="login-page">
+    <div class="login-container">
+        <div class="login-card">
+            <div class="login-header">
+                <span class="login-logo">&#128274;</span>
+                <h1>Cambiar Contraseña</h1>
+                <p>Debes establecer una nueva contraseña para continuar</p>
+            </div>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }}">
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <form method="POST" class="login-form">
+                {{ form.hidden_tag() }}
+
+                <div class="form-group">
+                    <label for="nueva_contrasena">Nueva contraseña</label>
+                    {{ form.nueva_contrasena(class="form-control", placeholder="••••••••") }}
+                    {% if form.nueva_contrasena.errors %}
+                        <span class="error-text">{{ form.nueva_contrasena.errors[0] }}</span>
+                    {% endif %}
+                </div>
+
+                <div class="form-group">
+                    <label for="confirmar_contrasena">Confirmar contraseña</label>
+                    {{ form.confirmar_contrasena(class="form-control", placeholder="••••••••") }}
+                    {% if form.confirmar_contrasena.errors %}
+                        <span class="error-text">{{ form.confirmar_contrasena.errors[0] }}</span>
+                    {% endif %}
+                </div>
+
+                <div class="password-requirements">
+                    <p><strong>La contraseña debe contener:</strong></p>
+                    <ul>
+                        <li>Mínimo 8 caracteres</li>
+                        <li>Al menos una mayúscula</li>
+                        <li>Al menos una minúscula</li>
+                        <li>Al menos un número</li>
+                        <li>Al menos un símbolo especial</li>
+                    </ul>
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-block">
+                    Establecer Contraseña
+                </button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

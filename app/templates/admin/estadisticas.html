@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Estadísticas - Administración{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Estadísticas del Sistema</h1>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-icon">&#128101;</div>
+        <div class="stat-content">
+            <div class="stat-value">{{ usuarios_por_rol.get('usuario', 0) + usuarios_por_rol.get('admin', 0) }}</div>
+            <div class="stat-label">Usuarios Totales</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">&#128081;</div>
+        <div class="stat-content">
+            <div class="stat-value">{{ usuarios_por_rol.get('admin', 0) }}</div>
+            <div class="stat-label">Administradores</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">&#128231;</div>
+        <div class="stat-content">
+            <div class="stat-value">{{ total_cuentas_gmail }}</div>
+            <div class="stat-label">Cuentas Gmail</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">&#128196;</div>
+        <div class="stat-content">
+            <div class="stat-value">{{ total_pdfs }}</div>
+            <div class="stat-label">PDFs Descargados</div>
+        </div>
+    </div>
+</div>
+
+<div class="grid-2">
+    <div class="card">
+        <div class="card-header">
+            <h2>Escaneos por Estado</h2>
+        </div>
+        <div class="card-body">
+            <div class="stat-bars">
+                {% set total_escaneos = escaneos_por_estado.values()|sum or 1 %}
+                {% for estado, cantidad in escaneos_por_estado.items() %}
+                <div class="stat-bar-item">
+                    <div class="stat-bar-label">
+                        <span>{{ estado }}</span>
+                        <span>{{ cantidad }}</span>
+                    </div>
+                    <div class="stat-bar">
+                        <div class="stat-bar-fill bar-{{ estado }}" style="width: {{ (cantidad / total_escaneos * 100)|int }}%"></div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h2>Actividad Reciente</h2>
+        </div>
+        <div class="card-body">
+            <div class="big-stat">
+                <div class="big-stat-value">{{ escaneos_recientes }}</div>
+                <div class="big-stat-label">Escaneos en los últimos 30 días</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

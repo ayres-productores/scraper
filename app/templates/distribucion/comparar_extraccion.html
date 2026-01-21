@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}Comparar Extraccion - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <a href="{{ url_for('distribucion.interprete_pdf') }}" class="btn btn-sm btn-outline">&larr; Volver</a>
+        <h1>Comparar Extraccion</h1>
+        <p class="text-muted">{{ archivo.nombre_archivo }}</p>
+    </div>
+</div>
+
+<div class="alert alert-info">
+    Comparacion entre los datos actuales de la poliza y los datos re-extraidos del PDF.
+    Los campos con diferencias estan resaltados.
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2>Comparacion de Datos</h2>
+    </div>
+    <div class="card-body">
+        <table class="table table-comparacion">
+            <thead>
+                <tr>
+                    <th>Campo</th>
+                    <th>Valor Actual</th>
+                    <th>Valor Re-extraido</th>
+                    <th>Accion</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% macro comparar(campo, label, actual, nuevo) %}
+                {% set diferente = actual != nuevo and (actual or nuevo) %}
+                <tr class="{% if diferente %}fila-diferente{% endif %}">
+                    <td><strong>{{ label }}</strong></td>
+                    <td>{{ actual or '-' }}</td>
+                    <td>{{ nuevo or '-' }}</td>
+                    <td>
+                        {% if diferente %}
+                        <span class="badge badge-warning">Diferente</span>
+                        {% else %}
+                        <span class="badge badge-success">Igual</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endmacro %}
+
+                {{ comparar('numero_poliza', 'Numero de Poliza', poliza.numero_poliza, datos_nuevos.numero_poliza) }}
+                {{ comparar('tipo_seguro', 'Tipo de Seguro', poliza.tipo_seguro, datos_nuevos.tipo_seguro) }}
+                {{ comparar('fecha_desde', 'Vigencia Desde', poliza.fecha_vigencia_desde|string if poliza.fecha_vigencia_desde else '', datos_nuevos.fecha_vigencia_desde|string if datos_nuevos.fecha_vigencia_desde else '') }}
+                {{ comparar('fecha_hasta', 'Vigencia Hasta', poliza.fecha_vigencia_hasta|string if poliza.fecha_vigencia_hasta else '', datos_nuevos.fecha_vigencia_hasta|string if datos_nuevos.fecha_vigencia_hasta else '') }}
+                {{ comparar('prima', 'Prima Anual', poliza.prima_anual|string if poliza.prima_anual else '', datos_nuevos.prima_anual|string if datos_nuevos.prima_anual else '') }}
+                {{ comparar('suma', 'Suma Asegurada', poliza.suma_asegurada|string if poliza.suma_asegurada else '', datos_nuevos.suma_asegurada|string if datos_nuevos.suma_asegurada else '') }}
+                {{ comparar('asegurado', 'Asegurado', poliza.asegurado_nombre, datos_nuevos.asegurado_nombre) }}
+                {{ comparar('documento', 'Documento', poliza.asegurado_documento, datos_nuevos.asegurado_documento) }}
+                {{ comparar('marca', 'Vehiculo Marca', poliza.vehiculo_marca, datos_nuevos.vehiculo_marca) }}
+                {{ comparar('modelo', 'Vehiculo Modelo', poliza.vehiculo_modelo, datos_nuevos.vehiculo_modelo) }}
+                {{ comparar('patente', 'Vehiculo Patente', poliza.vehiculo_patente, datos_nuevos.vehiculo_patente) }}
+                {{ comparar('anio', 'Vehiculo Ano', poliza.vehiculo_anio|string if poliza.vehiculo_anio else '', datos_nuevos.vehiculo_anio|string if datos_nuevos.vehiculo_anio else '') }}
+                {{ comparar('chasis', 'Vehiculo Chasis', poliza.vehiculo_chasis, datos_nuevos.vehiculo_chasis) }}
+            </tbody>
+        </table>
+
+        <div class="comparacion-stats">
+            <p>
+                <strong>Confianza de la nueva extraccion:</strong>
+                <span class="confianza-badge {% if datos_nuevos.confianza >= 0.8 %}alta{% elif datos_nuevos.confianza >= 0.5 %}media{% else %}baja{% endif %}">
+                    {{ "%.0f"|format((datos_nuevos.confianza or 0) * 100) }}%
+                </span>
+            </p>
+        </div>
+
+        <div class="comparacion-actions">
+            <a href="{{ url_for('distribucion.extraer_pdf', archivo_id=archivo.id) }}" class="btn btn-primary">
+                Editar con Nuevos Datos
+            </a>
+            <a href="{{ url_for('distribucion.poliza_completa', poliza_id=poliza.id) }}" class="btn btn-outline">
+                Ver Poliza Actual
+            </a>
+            <a href="{{ url_for('distribucion.interprete_pdf') }}" class="btn btn-outline">
+                Volver
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.table-comparacion th:first-child { width: 20%; }
+.table-comparacion th:nth-child(2),
+.table-comparacion th:nth-child(3) { width: 35%; }
+.table-comparacion th:last-child { width: 10%; text-align: center; }
+
+.fila-diferente {
+    background: rgba(255, 193, 7, 0.15);
+}
+.fila-diferente td {
+    border-left: 3px solid var(--warning);
+}
+
+.comparacion-stats {
+    margin-top: 1.5rem;
+    padding: 1rem;
+    background: var(--light);
+    border-radius: var(--radius);
+}
+
+.confianza-badge {
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+.confianza-badge.alta { background: var(--success); color: white; }
+.confianza-badge.media { background: var(--warning); color: #333; }
+.confianza-badge.baja { background: var(--danger); color: white; }
+
+.comparacion-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--gray-light);
+}
+</style>
+{% endblock %}

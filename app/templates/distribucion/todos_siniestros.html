@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}Todos los Siniestros - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <a href="{{ url_for('distribucion.crm_dashboard') }}" class="btn btn-sm btn-outline">&larr; Volver al CRM</a>
+        <h1>Siniestros</h1>
+        <p class="text-muted">Todos los siniestros registrados</p>
+    </div>
+</div>
+
+<div class="filtros card mb-4">
+    <div class="card-body">
+        <form method="GET" class="filtros-form">
+            <div class="form-group">
+                <label>Estado</label>
+                <select name="estado" class="form-control">
+                    <option value="">Todos</option>
+                    <option value="denunciado" {% if estado_filtro == 'denunciado' %}selected{% endif %}>Denunciado</option>
+                    <option value="en_proceso" {% if estado_filtro == 'en_proceso' %}selected{% endif %}>En Proceso</option>
+                    <option value="documentacion" {% if estado_filtro == 'documentacion' %}selected{% endif %}>Esperando Documentacion</option>
+                    <option value="peritaje" {% if estado_filtro == 'peritaje' %}selected{% endif %}>En Peritaje</option>
+                    <option value="aprobado" {% if estado_filtro == 'aprobado' %}selected{% endif %}>Aprobado</option>
+                    <option value="rechazado" {% if estado_filtro == 'rechazado' %}selected{% endif %}>Rechazado</option>
+                    <option value="pagado" {% if estado_filtro == 'pagado' %}selected{% endif %}>Pagado</option>
+                    <option value="cerrado" {% if estado_filtro == 'cerrado' %}selected{% endif %}>Cerrado</option>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-outline">Filtrar</button>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        {% if siniestros %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Numero</th>
+                    <th>Cliente</th>
+                    <th>Poliza</th>
+                    <th>Fecha</th>
+                    <th>Tipo</th>
+                    <th>Monto</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sin in siniestros %}
+                <tr>
+                    <td>
+                        <strong>{{ sin.numero_siniestro or sin.id }}</strong>
+                        {% if sin.numero_siniestro_compania %}
+                        <br><small class="text-muted">{{ sin.numero_siniestro_compania }}</small>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="{{ url_for('distribucion.cliente_detalle', cliente_id=sin.poliza.cliente.id) }}">
+                            {{ sin.poliza.cliente.nombre_completo }}
+                        </a>
+                    </td>
+                    <td>
+                        <a href="{{ url_for('distribucion.poliza_completa', poliza_id=sin.poliza.id) }}">
+                            {{ sin.poliza.numero_poliza or 'Sin numero' }}
+                        </a>
+                    </td>
+                    <td>{{ sin.fecha_ocurrencia.strftime('%d/%m/%Y') }}</td>
+                    <td>{{ sin.tipo_siniestro or '-' }}</td>
+                    <td>
+                        {% if sin.monto_pagado %}
+                        <span class="text-success">${{ "%.2f"|format(sin.monto_pagado) }}</span>
+                        {% elif sin.monto_aprobado %}
+                        <span class="text-info">${{ "%.2f"|format(sin.monto_aprobado) }}</span>
+                        {% elif sin.monto_reclamado %}
+                        ${{ "%.2f"|format(sin.monto_reclamado) }}
+                        {% else %}
+                        -
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge {% if sin.estado == 'pagado' %}badge-success{% elif sin.estado == 'rechazado' %}badge-danger{% elif sin.estado == 'aprobado' %}badge-info{% elif sin.estado == 'cerrado' %}badge-dark{% else %}badge-warning{% endif %}">
+                            {{ sin.estado|capitalize }}
+                        </span>
+                    </td>
+                    <td>
+                        <a href="{{ url_for('distribucion.editar_siniestro', siniestro_id=sin.id) }}" class="btn btn-sm btn-outline">Ver/Editar</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <p>No hay siniestros registrados.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.filtros-form { display: flex; gap: 1rem; align-items: flex-end; }
+.filtros-form .form-group { margin: 0; }
+.badge-dark { background: #333; color: white; }
+.text-success { color: var(--success); }
+.text-info { color: var(--primary); }
+.empty-state { text-align: center; padding: 2rem; color: var(--gray); }
+</style>
+{% endblock %}

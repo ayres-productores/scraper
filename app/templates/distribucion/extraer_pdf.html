@@ -1,0 +1,450 @@
+{% extends "base.html" %}
+
+{% block title %}Extraer Datos PDF - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <a href="{{ url_for('distribucion.interprete_pdf') }}" class="btn btn-sm btn-outline">&larr; Volver al Interprete</a>
+        <h1>Extraccion de Datos</h1>
+        <p class="text-muted">{{ archivo.nombre_archivo }}</p>
+    </div>
+    <div class="header-actions">
+        <a href="{{ url_for('main.ver_archivo', archivo_id=archivo.id) }}" target="_blank" class="btn btn-outline">
+            &#128196; Ver PDF
+        </a>
+    </div>
+</div>
+
+{% if error %}
+<div class="alert alert-danger">
+    <strong>Error:</strong> {{ error }}
+</div>
+{% endif %}
+
+{% if poliza_existente %}
+<div class="alert alert-warning">
+    <strong>Este PDF ya tiene una poliza asociada:</strong>
+    <a href="{{ url_for('distribucion.poliza_completa', poliza_id=poliza_existente.id) }}">
+        {{ poliza_existente.numero_poliza or 'Poliza #' + poliza_existente.id|string }}
+    </a>
+    (Cliente: {{ poliza_existente.cliente.nombre_completo }})
+</div>
+{% endif %}
+
+<div class="grid-2">
+    <!-- Panel de datos extraidos -->
+    <div class="card">
+        <div class="card-header">
+            <h2>Datos Extraidos</h2>
+            {% if datos.confianza is defined %}
+            <div class="confianza-badge {% if datos.confianza >= 0.8 %}alta{% elif datos.confianza >= 0.5 %}media{% else %}baja{% endif %}">
+                {{ "%.0f"|format(datos.confianza * 100) }}% confianza
+            </div>
+            {% endif %}
+        </div>
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('distribucion.guardar_extraccion', archivo_id=archivo.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="confianza" value="{{ datos.confianza or 0 }}">
+
+                {% if poliza_existente %}
+                <div class="form-group">
+                    <label>Accion</label>
+                    <div class="radio-group">
+                        <label class="radio-option">
+                            <input type="radio" name="accion" value="actualizar" checked>
+                            <span>Actualizar poliza existente</span>
+                        </label>
+                        <label class="radio-option">
+                            <input type="radio" name="accion" value="crear">
+                            <span>Crear nueva poliza</span>
+                        </label>
+                        <label class="radio-option">
+                            <input type="radio" name="accion" value="omitir">
+                            <span>Omitir este archivo</span>
+                        </label>
+                    </div>
+                </div>
+                <hr>
+                {% endif %}
+
+                <!-- Cliente -->
+                <div class="form-group">
+                    <label class="required">Cliente</label>
+                    <select name="cliente_id" class="form-control" required>
+                        <option value="">Seleccionar cliente...</option>
+                        {% for cliente in clientes %}
+                        <option value="{{ cliente.id }}"
+                            {% if poliza_existente and poliza_existente.cliente_id == cliente.id %}selected{% endif %}>
+                            {{ cliente.nombre_completo }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    <small class="form-text">
+                        <a href="{{ url_for('distribucion.nuevo_cliente') }}" target="_blank">+ Crear nuevo cliente</a>
+                    </small>
+                </div>
+
+                <!-- Datos basicos -->
+                <h3 class="section-title">Datos de la Poliza</h3>
+
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Numero de Poliza</label>
+                        <input type="text" name="numero_poliza" class="form-control"
+                               value="{{ poliza_existente.numero_poliza if poliza_existente else datos.numero_poliza or '' }}">
+                    </div>
+                    <div class="form-group half">
+                        <label>Compania</label>
+                        <select name="compania_id" class="form-control">
+                            <option value="">Seleccionar...</option>
+                            {% for compania in companias %}
+                            <option value="{{ compania.id }}"
+                                {% if archivo.compania_id == compania.id %}selected{% endif %}>
+                                {{ compania.nombre }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Tipo de Seguro</label>
+                        <select name="tipo_seguro" class="form-control">
+                            <option value="">Seleccionar...</option>
+                            {% for valor, nombre in tipos_seguro %}
+                            <option value="{{ valor }}"
+                                {% if (poliza_existente and poliza_existente.tipo_seguro == valor) or datos.tipo_seguro == valor %}selected{% endif %}>
+                                {{ nombre }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group half">
+                        <label>Tipo de Bien</label>
+                        <select name="bien_asegurado_tipo" class="form-control" onchange="mostrarSeccion(this.value)">
+                            <option value="">Seleccionar...</option>
+                            {% for valor, nombre in tipos_bien %}
+                            <option value="{{ valor }}"
+                                {% if (poliza_existente and poliza_existente.bien_asegurado_tipo == valor) or datos.bien_asegurado_tipo == valor %}selected{% endif %}>
+                                {{ nombre }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Vigencia Desde</label>
+                        <input type="date" name="fecha_vigencia_desde" class="form-control"
+                               value="{{ (poliza_existente.fecha_vigencia_desde if poliza_existente else datos.fecha_vigencia_desde)|default('', true) }}">
+                    </div>
+                    <div class="form-group half">
+                        <label>Vigencia Hasta</label>
+                        <input type="date" name="fecha_vigencia_hasta" class="form-control"
+                               value="{{ (poliza_existente.fecha_vigencia_hasta if poliza_existente else datos.fecha_vigencia_hasta)|default('', true) }}">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Prima Anual ($)</label>
+                        <input type="text" name="prima_anual" class="form-control"
+                               value="{{ (poliza_existente.prima_anual if poliza_existente else datos.prima_anual)|default('', true) }}">
+                    </div>
+                    <div class="form-group half">
+                        <label>Suma Asegurada ($)</label>
+                        <input type="text" name="suma_asegurada" class="form-control"
+                               value="{{ (poliza_existente.suma_asegurada if poliza_existente else datos.suma_asegurada)|default('', true) }}">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Deducible ($)</label>
+                    <input type="text" name="deducible" class="form-control"
+                           value="{{ (poliza_existente.deducible if poliza_existente else '')|default('', true) }}">
+                </div>
+
+                <!-- Datos del asegurado -->
+                <h3 class="section-title">Datos del Asegurado</h3>
+
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Nombre</label>
+                        <input type="text" name="asegurado_nombre" class="form-control"
+                               value="{{ (poliza_existente.asegurado_nombre if poliza_existente else datos.asegurado_nombre)|default('', true) }}">
+                    </div>
+                    <div class="form-group half">
+                        <label>Documento (DNI/CUIT)</label>
+                        <input type="text" name="asegurado_documento" class="form-control"
+                               value="{{ (poliza_existente.asegurado_documento if poliza_existente else datos.asegurado_documento)|default('', true) }}">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Direccion</label>
+                    <input type="text" name="asegurado_direccion" class="form-control"
+                           value="{{ (poliza_existente.asegurado_direccion if poliza_existente else '')|default('', true) }}">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Telefono</label>
+                        <input type="text" name="asegurado_telefono" class="form-control"
+                               value="{{ (poliza_existente.asegurado_telefono if poliza_existente else '')|default('', true) }}">
+                    </div>
+                    <div class="form-group half">
+                        <label>Email</label>
+                        <input type="email" name="asegurado_email" class="form-control"
+                               value="{{ (poliza_existente.asegurado_email if poliza_existente else '')|default('', true) }}">
+                    </div>
+                </div>
+
+                <!-- Datos de vehiculo -->
+                <div id="seccion-vehiculo" class="seccion-bien" style="display: none;">
+                    <h3 class="section-title">Datos del Vehiculo</h3>
+
+                    <div class="form-row">
+                        <div class="form-group half">
+                            <label>Marca</label>
+                            <input type="text" name="vehiculo_marca" class="form-control"
+                                   value="{{ (poliza_existente.vehiculo_marca if poliza_existente else datos.vehiculo_marca)|default('', true) }}">
+                        </div>
+                        <div class="form-group half">
+                            <label>Modelo</label>
+                            <input type="text" name="vehiculo_modelo" class="form-control"
+                                   value="{{ (poliza_existente.vehiculo_modelo if poliza_existente else datos.vehiculo_modelo)|default('', true) }}">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group third">
+                            <label>Ano</label>
+                            <input type="number" name="vehiculo_anio" class="form-control"
+                                   value="{{ (poliza_existente.vehiculo_anio if poliza_existente else datos.vehiculo_anio)|default('', true) }}">
+                        </div>
+                        <div class="form-group third">
+                            <label>Patente</label>
+                            <input type="text" name="vehiculo_patente" class="form-control"
+                                   value="{{ (poliza_existente.vehiculo_patente if poliza_existente else datos.vehiculo_patente)|default('', true) }}">
+                        </div>
+                        <div class="form-group third">
+                            <label>Motor</label>
+                            <input type="text" name="vehiculo_motor" class="form-control"
+                                   value="{{ (poliza_existente.vehiculo_motor if poliza_existente else datos.vehiculo_motor)|default('', true) }}">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Chasis (VIN)</label>
+                        <input type="text" name="vehiculo_chasis" class="form-control"
+                               value="{{ (poliza_existente.vehiculo_chasis if poliza_existente else datos.vehiculo_chasis)|default('', true) }}">
+                    </div>
+                </div>
+
+                <!-- Datos de inmueble -->
+                <div id="seccion-inmueble" class="seccion-bien" style="display: none;">
+                    <h3 class="section-title">Datos del Inmueble</h3>
+                    <div class="form-group">
+                        <label>Descripcion</label>
+                        <textarea name="bien_asegurado_descripcion" class="form-control" rows="2">{{ (poliza_existente.bien_asegurado_descripcion if poliza_existente else '')|default('', true) }}</textarea>
+                    </div>
+                </div>
+
+                <!-- Forma de pago -->
+                <h3 class="section-title">Forma de Pago</h3>
+
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Forma de Pago</label>
+                        <select name="forma_pago" class="form-control">
+                            <option value="">Seleccionar...</option>
+                            {% for valor, nombre in formas_pago %}
+                            <option value="{{ valor }}"
+                                {% if poliza_existente and poliza_existente.forma_pago == valor %}selected{% endif %}>
+                                {{ nombre }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group half">
+                        <label>Cantidad de Cuotas</label>
+                        <input type="number" name="cantidad_cuotas" class="form-control"
+                               value="{{ (poliza_existente.cantidad_cuotas if poliza_existente else '')|default('', true) }}">
+                    </div>
+                </div>
+
+                <!-- Productor -->
+                <h3 class="section-title">Productor / Agente</h3>
+
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Nombre</label>
+                        <input type="text" name="productor_nombre" class="form-control"
+                               value="{{ (poliza_existente.productor_nombre if poliza_existente else '')|default('', true) }}">
+                    </div>
+                    <div class="form-group half">
+                        <label>Telefono</label>
+                        <input type="text" name="productor_telefono" class="form-control"
+                               value="{{ (poliza_existente.productor_telefono if poliza_existente else '')|default('', true) }}">
+                    </div>
+                </div>
+
+                <!-- Notas y revision -->
+                <h3 class="section-title">Notas y Revision</h3>
+
+                <div class="form-group">
+                    <label>Notas</label>
+                    <textarea name="notas" class="form-control" rows="2">{{ (poliza_existente.notas if poliza_existente else '')|default('', true) }}</textarea>
+                </div>
+
+                <div class="form-group">
+                    <label class="checkbox-group">
+                        <input type="checkbox" name="requiere_revision"
+                            {% if (poliza_existente and poliza_existente.requiere_revision) or (datos.confianza is defined and datos.confianza < 0.6) %}checked{% endif %}>
+                        <span>Marcar para revision posterior</span>
+                    </label>
+                </div>
+
+                <!-- Botones de accion -->
+                <div class="form-actions">
+                    <button type="submit" name="siguiente" value="guardar" class="btn btn-primary">
+                        Guardar
+                    </button>
+                    <button type="submit" name="siguiente" value="continuar" class="btn btn-success">
+                        Guardar y Continuar
+                    </button>
+                    <a href="{{ url_for('distribucion.interprete_pdf') }}" class="btn btn-outline">Cancelar</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Visor de PDF -->
+    <div class="card pdf-viewer-card">
+        <div class="card-header">
+            <h2>Vista Previa del PDF</h2>
+        </div>
+        <div class="card-body pdf-viewer-body">
+            <iframe src="{{ url_for('main.ver_archivo', archivo_id=archivo.id) }}" class="pdf-viewer-iframe"></iframe>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    align-items: start;
+}
+
+.section-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--primary);
+    margin: 1.5rem 0 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--gray-light);
+}
+
+.form-row {
+    display: flex;
+    gap: 1rem;
+}
+.form-group.half { flex: 1; }
+.form-group.third { flex: 1; }
+
+.form-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--gray-light);
+}
+
+.confianza-badge {
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+.confianza-badge.alta { background: var(--success); color: white; }
+.confianza-badge.media { background: var(--warning); color: #333; }
+.confianza-badge.baja { background: var(--danger); color: white; }
+
+.radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.radio-option {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+}
+
+.pdf-viewer-card {
+    position: sticky;
+    top: 1rem;
+}
+.pdf-viewer-body {
+    padding: 0;
+    height: 80vh;
+}
+.pdf-viewer-iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    border-radius: 0 0 var(--radius) var(--radius);
+}
+
+label.required::after {
+    content: ' *';
+    color: var(--danger);
+}
+
+@media (max-width: 1024px) {
+    .grid-2 {
+        grid-template-columns: 1fr;
+    }
+    .pdf-viewer-card {
+        position: relative;
+        order: -1;
+    }
+    .pdf-viewer-body {
+        height: 50vh;
+    }
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function mostrarSeccion(tipo) {
+    // Ocultar todas las secciones
+    document.querySelectorAll('.seccion-bien').forEach(el => el.style.display = 'none');
+
+    // Mostrar seccion correspondiente
+    if (tipo === 'vehiculo') {
+        document.getElementById('seccion-vehiculo').style.display = 'block';
+    } else if (tipo === 'inmueble') {
+        document.getElementById('seccion-inmueble').style.display = 'block';
+    }
+}
+
+// Mostrar seccion inicial si hay tipo seleccionado
+document.addEventListener('DOMContentLoaded', function() {
+    const tipoSelect = document.querySelector('select[name="bien_asegurado_tipo"]');
+    if (tipoSelect && tipoSelect.value) {
+        mostrarSeccion(tipoSelect.value);
+    }
+});
+</script>
+{% endblock %}

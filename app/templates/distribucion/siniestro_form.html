@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block title %}{{ titulo }} - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <a href="{{ url_for('distribucion.siniestros_poliza', poliza_id=poliza.id) }}" class="btn btn-sm btn-outline">&larr; Volver</a>
+    <h1>{{ titulo }}</h1>
+    <p class="text-muted">{{ poliza.cliente.nombre_completo }} | {{ poliza.numero_poliza or 'Sin numero' }}</p>
+</div>
+
+<form method="POST">
+    {{ form.hidden_tag() }}
+
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-header"><h3>Datos del Siniestro</h3></div>
+            <div class="card-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        {{ form.numero_siniestro.label }}
+                        {{ form.numero_siniestro(class="form-control", placeholder="Numero interno") }}
+                    </div>
+                    <div class="form-group">
+                        {{ form.numero_siniestro_compania.label }}
+                        {{ form.numero_siniestro_compania(class="form-control", placeholder="Numero de la compania") }}
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        {{ form.fecha_ocurrencia.label }}
+                        {{ form.fecha_ocurrencia(class="form-control") }}
+                        {% if form.fecha_ocurrencia.errors %}
+                        <span class="error">{{ form.fecha_ocurrencia.errors[0] }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="form-group">
+                        {{ form.fecha_denuncia.label }}
+                        {{ form.fecha_denuncia(class="form-control") }}
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        {{ form.tipo_siniestro.label }}
+                        {{ form.tipo_siniestro(class="form-control") }}
+                    </div>
+                    <div class="form-group">
+                        {{ form.ubicacion.label }}
+                        {{ form.ubicacion(class="form-control", placeholder="Lugar del siniestro") }}
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    {{ form.descripcion.label }}
+                    {{ form.descripcion(class="form-control", rows="4", placeholder="Describe el siniestro en detalle...") }}
+                    {% if form.descripcion.errors %}
+                    <span class="error">{{ form.descripcion.errors[0] }}</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><h3>Lesiones y Terceros</h3></div>
+            <div class="card-body">
+                <div class="form-group">
+                    {{ form.hay_lesionados() }} {{ form.hay_lesionados.label }}
+                </div>
+
+                <div class="form-group" id="seccion_lesiones" style="display: none;">
+                    {{ form.descripcion_lesiones.label }}
+                    {{ form.descripcion_lesiones(class="form-control", rows="3", placeholder="Describe las lesiones...") }}
+                </div>
+
+                <div class="form-group">
+                    {{ form.terceros_texto.label }}
+                    {{ form.terceros_texto(class="form-control", rows="3", placeholder="Nombre - Telefono (uno por linea)") }}
+                    <small class="text-muted">Formato: Nombre - Telefono, uno por linea</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid-2 mt-4">
+        <div class="card">
+            <div class="card-header"><h3>Montos</h3></div>
+            <div class="card-body">
+                <div class="form-group">
+                    {{ form.monto_reclamado.label }}
+                    {{ form.monto_reclamado(class="form-control") }}
+                </div>
+
+                {% if siniestro %}
+                {% if siniestro.monto_aprobado %}
+                <div class="info-row">
+                    <span>Monto Aprobado:</span>
+                    <strong>${{ "%.2f"|format(siniestro.monto_aprobado) }}</strong>
+                </div>
+                {% endif %}
+                {% if siniestro.monto_pagado %}
+                <div class="info-row">
+                    <span>Monto Pagado:</span>
+                    <strong>${{ "%.2f"|format(siniestro.monto_pagado) }}</strong>
+                </div>
+                {% endif %}
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><h3>Estado</h3></div>
+            <div class="card-body">
+                <div class="form-group">
+                    {{ form.estado.label }}
+                    {{ form.estado(class="form-control") }}
+                </div>
+
+                <div class="form-group">
+                    {{ form.notas.label }}
+                    {{ form.notas(class="form-control", rows="3") }}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="form-actions mt-4">
+        {{ form.submit(class="btn btn-primary btn-lg") }}
+        <a href="{{ url_for('distribucion.siniestros_poliza', poliza_id=poliza.id) }}" class="btn btn-outline">Cancelar</a>
+    </div>
+</form>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.info-row { display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--light); }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const chkLesionados = document.querySelector('[name="hay_lesionados"]');
+const seccionLesiones = document.getElementById('seccion_lesiones');
+
+function toggleLesiones() {
+    seccionLesiones.style.display = chkLesionados.checked ? 'block' : 'none';
+}
+
+chkLesionados.addEventListener('change', toggleLesiones);
+toggleLesiones();
+</script>
+{% endblock %}

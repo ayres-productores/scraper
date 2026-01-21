@@ -1,0 +1,343 @@
+{% extends "base.html" %}
+
+{% block title %}{{ cliente.nombre_completo }} - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="header-title">
+        <a href="{{ url_for('distribucion.clientes') }}" class="btn btn-sm btn-outline">&#8592;</a>
+        <h1>{{ cliente.nombre_completo }}</h1>
+        {% if not cliente.activo %}
+        <span class="badge badge-secondary">Inactivo</span>
+        {% endif %}
+    </div>
+    <div class="header-actions">
+        <a href="{{ url_for('distribucion.editar_cliente', cliente_id=cliente.id) }}" class="btn btn-outline">Editar</a>
+        <a href="{{ url_for('distribucion.enviar_directo', cliente_id=cliente.id) }}" class="btn btn-success" target="_blank">&#128172; WhatsApp</a>
+    </div>
+</div>
+
+<div class="grid-2">
+    <!-- Información de Contacto -->
+    <div class="card">
+        <div class="card-header">
+            <h2>Información de Contacto</h2>
+        </div>
+        <div class="card-body">
+            <div class="info-list">
+                <div class="info-item">
+                    <span class="info-icon">&#128241;</span>
+                    <div>
+                        <strong>WhatsApp</strong>
+                        <span>{{ cliente.telefono_whatsapp }}</span>
+                    </div>
+                </div>
+                {% if cliente.email %}
+                <div class="info-item">
+                    <span class="info-icon">&#128231;</span>
+                    <div>
+                        <strong>Email</strong>
+                        <span>{{ cliente.email }}</span>
+                    </div>
+                </div>
+                {% endif %}
+                {% if cliente.documento_identidad %}
+                <div class="info-item">
+                    <span class="info-icon">&#127380;</span>
+                    <div>
+                        <strong>Documento</strong>
+                        <span>{{ cliente.documento_identidad }}</span>
+                    </div>
+                </div>
+                {% endif %}
+                <div class="info-item">
+                    <span class="info-icon">&#128197;</span>
+                    <div>
+                        <strong>Cliente desde</strong>
+                        <span>{{ cliente.fecha_registro.strftime('%d/%m/%Y') }}</span>
+                    </div>
+                </div>
+            </div>
+
+            {% if cliente.notas %}
+            <div class="notas-section">
+                <h4>Notas</h4>
+                <p>{{ cliente.notas }}</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Configuración de Mensaje -->
+    <div class="card">
+        <div class="card-header">
+            <h2>Configuración de Mensaje</h2>
+        </div>
+        <div class="card-body">
+            {% if cliente.usar_mensaje_estandar %}
+            <div class="mensaje-config">
+                <span class="badge badge-outline">&#128172; Mensaje Estándar</span>
+                <p class="text-muted">Este cliente recibe el mensaje estándar del sistema.</p>
+            </div>
+            {% else %}
+            <div class="mensaje-config">
+                <span class="badge badge-primary">&#128172; Mensaje Personalizado</span>
+                <div class="mensaje-preview">
+                    {{ cliente.mensaje_personalizado or 'Sin mensaje configurado' }}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Pólizas Asignadas -->
+<div class="card">
+    <div class="card-header">
+        <h2>&#128196; Pólizas Asignadas</h2>
+        <a href="{{ url_for('distribucion.asignar_poliza') }}?cliente_id={{ cliente.id }}" class="btn btn-sm btn-primary">+ Asignar Nueva</a>
+    </div>
+    <div class="card-body">
+        {% if polizas %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Compañía</th>
+                    <th>Tipo</th>
+                    <th>Nº Póliza</th>
+                    <th>Vigencia</th>
+                    <th>Prima</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for poliza in polizas %}
+                <tr>
+                    <td>
+                        {% if poliza.compania %}
+                        <span class="badge badge-primary">{{ poliza.compania.nombre }}</span>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ poliza.tipo_seguro or '-' }}</td>
+                    <td>{{ poliza.numero_poliza or '-' }}</td>
+                    <td>
+                        {% if poliza.fecha_vigencia_desde and poliza.fecha_vigencia_hasta %}
+                        {{ poliza.fecha_vigencia_desde.strftime('%d/%m/%Y') }} - {{ poliza.fecha_vigencia_hasta.strftime('%d/%m/%Y') }}
+                        {% else %}
+                        -
+                        {% endif %}
+                    </td>
+                    <td>{% if poliza.prima_anual %}{{ "%.2f"|format(poliza.prima_anual) }} &euro;{% else %}-{% endif %}</td>
+                    <td class="actions-cell">
+                        <a href="{{ url_for('distribucion.enviar_poliza', poliza_id=poliza.id) }}" class="btn btn-sm btn-success" title="Enviar">&#128172;</a>
+                        <form method="POST" action="{{ url_for('distribucion.eliminar_poliza', poliza_id=poliza.id) }}" style="display: inline;" onsubmit="return confirm('¿Eliminar esta asignación?')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-danger" title="Eliminar">&#128465;</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state-small">
+            <p class="text-muted">No hay pólizas asignadas a este cliente.</p>
+            <a href="{{ url_for('distribucion.asignar_poliza') }}?cliente_id={{ cliente.id }}" class="btn btn-sm btn-primary">+ Asignar Póliza</a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Historial de Envíos -->
+<div class="card">
+    <div class="card-header">
+        <h2>&#128172; Historial de Envíos</h2>
+        {% set pendientes_cliente = envios|selectattr('estado', 'equalto', 'pendiente')|list|length %}
+        {% if pendientes_cliente > 0 %}
+        <span class="badge badge-warning badge-processing">
+            <span class="mini-spinner"></span> {{ pendientes_cliente }} en cola
+        </span>
+        {% endif %}
+    </div>
+    <div class="card-body">
+        {% if envios %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Póliza</th>
+                    <th>Estado</th>
+                    <th>Intentos</th>
+                    <th>Mensaje</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for envio in envios %}
+                <tr class="{% if envio.estado == 'pendiente' %}envio-pendiente{% endif %}">
+                    <td>
+                        {% if envio.fecha_envio %}
+                        {{ envio.fecha_envio.strftime('%d/%m/%Y %H:%M') }}
+                        {% elif envio.estado == 'pendiente' %}
+                        <span class="text-muted"><span class="mini-spinner"></span> En cola...</span>
+                        {% else %}
+                        -
+                        {% endif %}
+                    </td>
+                    <td>{{ envio.poliza.tipo_seguro if envio.poliza else 'Directo' }}</td>
+                    <td>
+                        <span class="badge badge-{{ 'success' if envio.estado == 'enviado' else 'danger' if envio.estado == 'error' else 'warning' }} {% if envio.estado == 'pendiente' %}badge-processing{% endif %}">
+                            {% if envio.estado == 'pendiente' %}
+                            procesando...
+                            {% else %}
+                            {{ envio.estado }}
+                            {% endif %}
+                        </span>
+                        {% if envio.mensaje_error %}
+                        <br><small class="text-danger">{{ envio.mensaje_error[:30] }}...</small>
+                        {% endif %}
+                    </td>
+                    <td>{{ envio.intentos }}</td>
+                    <td>
+                        <small>{{ (envio.mensaje_enviado or '')[:50] }}{% if envio.mensaje_enviado and envio.mensaje_enviado|length > 50 %}...{% endif %}</small>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-muted text-center">No hay envíos registrados para este cliente.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Botón de eliminar -->
+<div class="danger-zone">
+    <form method="POST" action="{{ url_for('distribucion.eliminar_cliente', cliente_id=cliente.id) }}" onsubmit="return confirm('¿Estás seguro de eliminar este cliente?')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-danger">&#128465; Eliminar Cliente</button>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.header-title {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.header-title h1 {
+    margin: 0;
+}
+
+.info-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.info-item {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.info-icon {
+    font-size: 1.5rem;
+    width: 40px;
+    text-align: center;
+}
+
+.info-item div {
+    display: flex;
+    flex-direction: column;
+}
+
+.info-item strong {
+    font-size: 0.85rem;
+    color: var(--gray);
+}
+
+.notas-section {
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--gray-light);
+}
+
+.notas-section h4 {
+    margin-bottom: 0.5rem;
+    color: var(--gray);
+    font-size: 0.9rem;
+}
+
+.mensaje-config {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.mensaje-preview {
+    background: var(--light);
+    padding: 1rem;
+    border-radius: var(--radius-sm);
+    white-space: pre-wrap;
+    font-size: 0.9rem;
+}
+
+.empty-state-small {
+    text-align: center;
+    padding: 2rem;
+}
+
+.danger-zone {
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--danger);
+    text-align: right;
+}
+
+.badge-processing {
+    animation: pulse-badge 1.5s infinite;
+}
+
+@keyframes pulse-badge {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+.mini-spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid rgba(0,0,0,0.2);
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.envio-pendiente {
+    background-color: rgba(255, 193, 7, 0.1);
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+{% set pendientes_cliente = envios|selectattr('estado', 'equalto', 'pendiente')|list|length %}
+{% if pendientes_cliente > 0 %}
+<script>
+// Auto-refresh cuando hay envíos pendientes para este cliente
+setInterval(function() {
+    location.reload();
+}, 10000);
+</script>
+{% endif %}
+{% endblock %}

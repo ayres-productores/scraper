@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+
+{% block title %}Alertas - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <a href="{{ url_for('distribucion.crm_dashboard') }}" class="btn btn-sm btn-outline">&larr; Volver al CRM</a>
+        <h1>Alertas</h1>
+        <p class="text-muted">Gestiona las alertas de vencimiento y seguimientos</p>
+    </div>
+    <div class="header-actions">
+        <form action="{{ url_for('distribucion.generar_alertas') }}" method="POST" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-primary">Generar Alertas</button>
+        </form>
+    </div>
+</div>
+
+<div class="filtros card mb-4">
+    <div class="card-body">
+        <form method="GET" class="filtros-form">
+            <div class="form-group">
+                <label>Tipo</label>
+                <select name="tipo" class="form-control">
+                    <option value="">Todos</option>
+                    <option value="vencimiento_poliza" {% if tipo_filtro == 'vencimiento_poliza' %}selected{% endif %}>Vencimiento de Poliza</option>
+                    <option value="vencimiento_pago" {% if tipo_filtro == 'vencimiento_pago' %}selected{% endif %}>Vencimiento de Pago</option>
+                    <option value="renovacion" {% if tipo_filtro == 'renovacion' %}selected{% endif %}>Renovacion</option>
+                    <option value="seguimiento" {% if tipo_filtro == 'seguimiento' %}selected{% endif %}>Seguimiento</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Estado</label>
+                <select name="estado" class="form-control">
+                    <option value="">Todos</option>
+                    <option value="pendiente" {% if estado_filtro == 'pendiente' %}selected{% endif %}>Pendiente</option>
+                    <option value="notificada" {% if estado_filtro == 'notificada' %}selected{% endif %}>Notificada</option>
+                    <option value="resuelta" {% if estado_filtro == 'resuelta' %}selected{% endif %}>Resuelta</option>
+                    <option value="descartada" {% if estado_filtro == 'descartada' %}selected{% endif %}>Descartada</option>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-outline">Filtrar</button>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        {% if alertas %}
+        <div class="alertas-lista">
+            {% for alerta in alertas %}
+            <div class="alerta-item alerta-{{ alerta.prioridad }} {% if alerta.estado == 'resuelta' %}alerta-resuelta{% endif %}">
+                <div class="alerta-tipo">
+                    {% if alerta.tipo == 'vencimiento_poliza' %}
+                    <span class="alerta-icon">&#128196;</span>
+                    <span>Vencimiento Poliza</span>
+                    {% elif alerta.tipo == 'vencimiento_pago' %}
+                    <span class="alerta-icon">&#128176;</span>
+                    <span>Vencimiento Pago</span>
+                    {% elif alerta.tipo == 'renovacion' %}
+                    <span class="alerta-icon">&#128260;</span>
+                    <span>Renovacion</span>
+                    {% else %}
+                    <span class="alerta-icon">&#128172;</span>
+                    <span>Seguimiento</span>
+                    {% endif %}
+                </div>
+                <div class="alerta-content">
+                    <div class="alerta-mensaje">{{ alerta.mensaje }}</div>
+                    <div class="alerta-meta">
+                        <span class="badge badge-{{ alerta.prioridad }}">{{ alerta.prioridad|upper }}</span>
+                        <span class="text-muted">Fecha: {{ alerta.fecha_alerta.strftime('%d/%m/%Y') }}</span>
+                        {% if alerta.dias_anticipacion %}
+                        <span class="text-muted">| {{ alerta.dias_anticipacion }} dias de anticipacion</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="alerta-estado">
+                    <span class="badge {% if alerta.estado == 'pendiente' %}badge-warning{% elif alerta.estado == 'resuelta' %}badge-success{% elif alerta.estado == 'notificada' %}badge-info{% else %}badge-dark{% endif %}">
+                        {{ alerta.estado|capitalize }}
+                    </span>
+                </div>
+                <div class="alerta-actions">
+                    {% if alerta.poliza %}
+                    <a href="{{ url_for('distribucion.poliza_completa', poliza_id=alerta.poliza.id) }}" class="btn btn-sm btn-outline" title="Ver poliza">&#128196;</a>
+                    {% endif %}
+                    {% if alerta.estado == 'pendiente' %}
+                    <form action="{{ url_for('distribucion.resolver_alerta', alerta_id=alerta.id) }}" method="POST" style="display:inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm btn-success" title="Resolver">&#10004;</button>
+                    </form>
+                    <form action="{{ url_for('distribucion.descartar_alerta', alerta_id=alerta.id) }}" method="POST" style="display:inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm btn-outline" title="Descartar">&#10006;</button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <p>No hay alertas que coincidan con los filtros.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.filtros-form { display: flex; gap: 1rem; align-items: flex-end; }
+.filtros-form .form-group { margin: 0; }
+
+.alertas-lista { display: flex; flex-direction: column; gap: 0.5rem; }
+.alerta-item {
+    display: flex;
+    align-items: center;
+    padding: 1rem;
+    background: var(--light);
+    border-radius: var(--radius-sm);
+    gap: 1rem;
+    border-left: 4px solid var(--gray);
+}
+.alerta-alta { border-left-color: var(--danger); }
+.alerta-media { border-left-color: var(--warning); }
+.alerta-baja { border-left-color: var(--primary); }
+.alerta-resuelta { opacity: 0.6; }
+
+.alerta-tipo {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 100px;
+}
+.alerta-icon { font-size: 1.5rem; }
+.alerta-content { flex: 1; }
+.alerta-mensaje { font-weight: 500; margin-bottom: 0.25rem; }
+.alerta-meta { display: flex; gap: 0.5rem; align-items: center; font-size: 0.85em; flex-wrap: wrap; }
+.alerta-actions { display: flex; gap: 0.25rem; }
+
+.badge-alta { background: var(--danger); color: white; }
+.badge-media { background: var(--warning); color: #333; }
+.badge-baja { background: var(--primary); color: white; }
+.badge-dark { background: #333; color: white; }
+
+.empty-state { text-align: center; padding: 2rem; color: var(--gray); }
+</style>
+{% endblock %}

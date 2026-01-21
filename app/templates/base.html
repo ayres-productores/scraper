@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>{% block title %}Portal de Seguros{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    {% if current_user.is_authenticated and not current_user.debe_cambiar_contrasena %}
+    <nav class="navbar">
+        <div class="navbar-brand">
+            <a href="{{ url_for('main.dashboard') }}">
+                <span class="logo-icon">&#128203;</span>
+                Portal de Seguros
+            </a>
+        </div>
+        <div class="navbar-menu">
+            <a href="{{ url_for('main.dashboard') }}" class="nav-link {% if request.endpoint == 'main.dashboard' %}active{% endif %}">
+                Dashboard
+            </a>
+            <a href="{{ url_for('extractor.index') }}" class="nav-link {% if 'extractor' in request.endpoint %}active{% endif %}">
+                Extractor
+            </a>
+            <a href="{{ url_for('main.archivos') }}" class="nav-link {% if request.endpoint == 'main.archivos' %}active{% endif %}">
+                Archivos
+            </a>
+            <a href="{{ url_for('distribucion.index') }}" class="nav-link {% if 'distribucion' in request.endpoint %}active{% endif %}">
+                Distribución
+            </a>
+            {% if current_user.es_admin() %}
+            <a href="{{ url_for('admin.index') }}" class="nav-link nav-admin {% if 'admin' in request.endpoint %}active{% endif %}">
+                Admin
+            </a>
+            {% endif %}
+        </div>
+        <div class="navbar-user">
+            <div class="user-dropdown">
+                <button class="user-button">
+                    <span class="user-icon">&#128100;</span>
+                    {{ current_user.nombre }}
+                    <span class="dropdown-arrow">&#9662;</span>
+                </button>
+                <div class="dropdown-menu">
+                    <a href="{{ url_for('auth.perfil') }}">Mi Perfil</a>
+                    <hr>
+                    <a href="{{ url_for('auth.logout') }}" class="logout-link">Cerrar Sesión</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+    {% endif %}
+
+    <main class="main-content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flash-messages">
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }}">
+                            <span class="alert-message">{{ message }}</span>
+                            <button class="alert-close" onclick="this.parentElement.remove()">&times;</button>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </main>
+
+    {% if current_user.is_authenticated and not current_user.debe_cambiar_contrasena %}
+    <footer class="footer">
+        <p>&copy; {{ now().year if now is defined else 2025 }} Portal de Pólizas de Seguros - Uso interno</p>
+    </footer>
+    {% endif %}
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}Envío Preparado - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="resultado-container">
+    <div class="card resultado-card">
+        <div class="card-body text-center">
+            <div class="resultado-icon">&#10004;</div>
+            <h1>¡Enlace de WhatsApp Generado!</h1>
+            <p class="resultado-mensaje">
+                Se abrirá WhatsApp para enviar el mensaje a <strong>{{ cliente.nombre_completo }}</strong>
+            </p>
+
+            <div class="resultado-detalles">
+                <div class="detalle-item">
+                    <span class="detalle-icon">&#128241;</span>
+                    <span>{{ cliente.telefono_whatsapp }}</span>
+                </div>
+                {% if poliza.tipo_seguro %}
+                <div class="detalle-item">
+                    <span class="detalle-icon">&#128196;</span>
+                    <span>{{ poliza.tipo_seguro }}</span>
+                </div>
+                {% endif %}
+            </div>
+
+            <div class="resultado-acciones">
+                <a href="{{ enlace }}" class="btn btn-success btn-lg" target="_blank" id="btn-whatsapp">
+                    &#128172; Abrir WhatsApp
+                </a>
+            </div>
+
+            <div class="resultado-nota">
+                <p><strong>Recuerda:</strong> Adjunta el archivo PDF manualmente en WhatsApp.</p>
+                {% if poliza.archivo %}
+                <a href="{{ url_for('main.descargar_archivo', archivo_id=poliza.archivo.id) }}" class="btn btn-outline btn-sm">
+                    &#128229; Descargar PDF
+                </a>
+                {% endif %}
+            </div>
+
+            <hr>
+
+            <div class="resultado-navegacion">
+                <a href="{{ url_for('distribucion.cliente_detalle', cliente_id=cliente.id) }}" class="btn btn-outline">
+                    &#8592; Volver al Cliente
+                </a>
+                <a href="{{ url_for('distribucion.clientes') }}" class="btn btn-outline">
+                    Ver Todos los Clientes
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.resultado-container {
+    display: flex;
+    justify-content: center;
+    padding: 2rem 0;
+}
+
+.resultado-card {
+    max-width: 500px;
+    width: 100%;
+}
+
+.resultado-icon {
+    font-size: 4rem;
+    color: var(--success);
+    margin-bottom: 1rem;
+}
+
+.resultado-card h1 {
+    font-size: 1.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.resultado-mensaje {
+    color: var(--gray);
+    margin-bottom: 1.5rem;
+}
+
+.resultado-detalles {
+    display: flex;
+    justify-content: center;
+    gap: 2rem;
+    margin-bottom: 2rem;
+}
+
+.detalle-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.detalle-icon {
+    font-size: 1.25rem;
+}
+
+.resultado-acciones {
+    margin-bottom: 2rem;
+}
+
+.resultado-nota {
+    background: var(--light);
+    padding: 1rem;
+    border-radius: var(--radius-sm);
+    margin-bottom: 1.5rem;
+}
+
+.resultado-nota p {
+    margin-bottom: 0.75rem;
+}
+
+.resultado-navegacion {
+    display: flex;
+    justify-content: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Abrir automáticamente WhatsApp
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(function() {
+        document.getElementById('btn-whatsapp').click();
+    }, 500);
+});
+</script>
+{% endblock %}

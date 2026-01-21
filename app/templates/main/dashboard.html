@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Bienvenido, {{ current_user.nombre }}</h1>
+    <p class="text-muted">Panel de control del extractor de pólizas</p>
+</div>
+
+{% if escaneo_activo %}
+<div class="alert alert-info">
+    <strong>Escaneo en progreso</strong> -
+    {{ escaneo_activo.correos_escaneados or 0 }} correos escaneados,
+    {{ escaneo_activo.pdfs_descargados or 0 }} PDFs descargados
+    <a href="{{ url_for('extractor.index') }}" class="btn btn-sm btn-outline" style="margin-left: 1rem;">Ver Progreso</a>
+</div>
+{% endif %}
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-icon">&#128231;</div>
+        <div class="stat-content">
+            <div class="stat-value">{{ total_cuentas }}</div>
+            <div class="stat-label">Cuentas Gmail</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">&#128269;</div>
+        <div class="stat-content">
+            <div class="stat-value">{{ total_escaneos }}</div>
+            <div class="stat-label">Escaneos Totales</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">&#9989;</div>
+        <div class="stat-content">
+            <div class="stat-value">{{ escaneos_completados }}</div>
+            <div class="stat-label">Escaneos Exitosos</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">&#128196;</div>
+        <div class="stat-content">
+            <div class="stat-value">{{ total_pdfs }}</div>
+            <div class="stat-label">PDFs Descargados</div>
+        </div>
+    </div>
+</div>
+
+<div class="grid-2">
+    <div class="card">
+        <div class="card-header">
+            <h2>Acciones Rápidas</h2>
+        </div>
+        <div class="card-body">
+            <div class="quick-actions">
+                <a href="{{ url_for('extractor.index') }}" class="action-button">
+                    <span class="action-icon">&#128269;</span>
+                    <span class="action-text">Nuevo Escaneo</span>
+                </a>
+                <a href="{{ url_for('main.archivos') }}" class="action-button">
+                    <span class="action-icon">&#128193;</span>
+                    <span class="action-text">Ver Archivos</span>
+                </a>
+                <a href="{{ url_for('extractor.historial') }}" class="action-button">
+                    <span class="action-icon">&#128197;</span>
+                    <span class="action-text">Historial</span>
+                </a>
+                <a href="{{ url_for('auth.perfil') }}" class="action-button">
+                    <span class="action-icon">&#9881;</span>
+                    <span class="action-text">Mi Perfil</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h2>Últimos 30 Días</h2>
+        </div>
+        <div class="card-body">
+            <div class="mini-stats">
+                <div class="mini-stat">
+                    <span class="mini-stat-value">{{ escaneos_recientes }}</span>
+                    <span class="mini-stat-label">Escaneos realizados</span>
+                </div>
+                <div class="mini-stat">
+                    <span class="mini-stat-value">{{ pdfs_recientes }}</span>
+                    <span class="mini-stat-label">PDFs descargados</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Widget de Compañías -->
+<div class="card">
+    <div class="card-header">
+        <h2>&#127970; Top Compañías Aseguradoras</h2>
+        <a href="{{ url_for('main.archivos') }}?vista=agrupada" class="btn btn-sm btn-outline">Ver todas</a>
+    </div>
+    <div class="card-body">
+        {% if top_companias %}
+        <div class="companias-grid">
+            {% for item in top_companias %}
+            <a href="{{ url_for('main.archivos') }}?compania={{ item.compania.id }}" class="compania-widget">
+                <div class="compania-widget-icon">&#127970;</div>
+                <div class="compania-widget-info">
+                    <span class="compania-widget-nombre">{{ item.compania.nombre }}</span>
+                    <span class="compania-widget-cantidad">{{ item.cantidad }} documentos</span>
+                </div>
+                <div class="compania-widget-arrow">&#8250;</div>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted text-center">No hay compañías detectadas aún. <a href="{{ url_for('extractor.index') }}">Inicia un escaneo</a> para detectar compañías automáticamente.</p>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2>Últimos Escaneos</h2>
+        <a href="{{ url_for('extractor.historial') }}" class="btn btn-sm btn-outline">Ver todos</a>
+    </div>
+    <div class="card-body">
+        {% if ultimos_escaneos %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Estado</th>
+                    <th>Correos</th>
+                    <th>PDFs</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for escaneo in ultimos_escaneos %}
+                <tr>
+                    <td>{{ escaneo.fecha_inicio.strftime('%d/%m/%Y %H:%M') }}</td>
+                    <td>
+                        <span class="badge badge-{{ 'success' if escaneo.estado == 'completado' else 'warning' if escaneo.estado == 'en_progreso' else 'danger' }}">
+                            {{ escaneo.estado }}
+                        </span>
+                    </td>
+                    <td>{{ escaneo.correos_escaneados or 0 }}</td>
+                    <td>{{ escaneo.pdfs_descargados or 0 }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-muted text-center">No hay escaneos registrados. <a href="{{ url_for('extractor.index') }}">Inicia tu primer escaneo</a></p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.companias-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.compania-widget {
+    display: flex;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    background: var(--light);
+    border-radius: var(--radius-sm);
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.2s;
+}
+
+.compania-widget:hover {
+    background: var(--gray-light);
+    transform: translateX(4px);
+}
+
+.compania-widget-icon {
+    font-size: 1.5rem;
+    margin-right: 1rem;
+}
+
+.compania-widget-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.compania-widget-nombre {
+    font-weight: 600;
+    color: var(--dark);
+}
+
+.compania-widget-cantidad {
+    font-size: 0.85rem;
+    color: var(--gray);
+}
+
+.compania-widget-arrow {
+    font-size: 1.25rem;
+    color: var(--gray);
+    font-weight: bold;
+}
+</style>
+{% endblock %}

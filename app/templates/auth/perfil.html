@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}Mi Perfil - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Mi Perfil</h1>
+</div>
+
+<div class="grid-2">
+    <div class="card">
+        <div class="card-header">
+            <h2>Información Personal</h2>
+        </div>
+        <div class="card-body">
+            <form method="POST">
+                {{ form_perfil.hidden_tag() }}
+
+                <div class="form-group">
+                    <label>Correo electrónico</label>
+                    <input type="email" class="form-control" value="{{ current_user.correo }}" disabled>
+                    <small class="form-text">El correo no puede ser modificado</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="nombre">Nombre completo</label>
+                    {{ form_perfil.nombre(class="form-control") }}
+                    {% if form_perfil.nombre.errors %}
+                        <span class="error-text">{{ form_perfil.nombre.errors[0] }}</span>
+                    {% endif %}
+                </div>
+
+                <div class="form-group">
+                    <label>Rol</label>
+                    <input type="text" class="form-control" value="{{ 'Administrador' if current_user.es_admin() else 'Usuario' }}" disabled>
+                </div>
+
+                <div class="form-group">
+                    <label>Miembro desde</label>
+                    <input type="text" class="form-control" value="{{ current_user.fecha_creacion.strftime('%d/%m/%Y') }}" disabled>
+                </div>
+
+                <button type="submit" name="guardar_perfil" class="btn btn-primary">
+                    Guardar Cambios
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h2>Cambiar Contraseña</h2>
+        </div>
+        <div class="card-body">
+            <form method="POST">
+                {{ form_contrasena.hidden_tag() }}
+
+                <div class="form-group">
+                    <label for="contrasena_actual">Contraseña actual</label>
+                    {{ form_contrasena.contrasena_actual(class="form-control") }}
+                    {% if form_contrasena.contrasena_actual.errors %}
+                        <span class="error-text">{{ form_contrasena.contrasena_actual.errors[0] }}</span>
+                    {% endif %}
+                </div>
+
+                <div class="form-group">
+                    <label for="nueva_contrasena">Nueva contraseña</label>
+                    {{ form_contrasena.nueva_contrasena(class="form-control") }}
+                    {% if form_contrasena.nueva_contrasena.errors %}
+                        <span class="error-text">{{ form_contrasena.nueva_contrasena.errors[0] }}</span>
+                    {% endif %}
+                </div>
+
+                <div class="form-group">
+                    <label for="confirmar_contrasena">Confirmar nueva contraseña</label>
+                    {{ form_contrasena.confirmar_contrasena(class="form-control") }}
+                    {% if form_contrasena.confirmar_contrasena.errors %}
+                        <span class="error-text">{{ form_contrasena.confirmar_contrasena.errors[0] }}</span>
+                    {% endif %}
+                </div>
+
+                <div class="password-requirements">
+                    <p><strong>Requisitos:</strong> mínimo 8 caracteres, mayúscula, minúscula, número y símbolo</p>
+                </div>
+
+                <button type="submit" name="cambiar_contrasena" class="btn btn-secondary">
+                    Cambiar Contraseña
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

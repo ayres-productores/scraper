@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}{{ titulo }} - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <a href="{{ url_for('distribucion.pagos_poliza', poliza_id=poliza.id) }}" class="btn btn-sm btn-outline">&larr; Volver</a>
+    <h1>{{ titulo }}</h1>
+    <p class="text-muted">{{ poliza.cliente.nombre_completo }} | {{ poliza.numero_poliza or 'Sin numero' }}</p>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form method="POST">
+            {{ form.hidden_tag() }}
+
+            <div class="form-row">
+                <div class="form-group">
+                    {{ form.numero_cuota.label }}
+                    {{ form.numero_cuota(class="form-control") }}
+                </div>
+                <div class="form-group">
+                    {{ form.monto.label }}
+                    {{ form.monto(class="form-control") }}
+                    {% if form.monto.errors %}
+                    <span class="error">{{ form.monto.errors[0] }}</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    {{ form.fecha_vencimiento.label }}
+                    {{ form.fecha_vencimiento(class="form-control") }}
+                    {% if form.fecha_vencimiento.errors %}
+                    <span class="error">{{ form.fecha_vencimiento.errors[0] }}</span>
+                    {% endif %}
+                </div>
+                <div class="form-group">
+                    {{ form.fecha_pago.label }}
+                    {{ form.fecha_pago(class="form-control") }}
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    {{ form.estado.label }}
+                    {{ form.estado(class="form-control") }}
+                </div>
+                <div class="form-group">
+                    {{ form.metodo_pago.label }}
+                    {{ form.metodo_pago(class="form-control") }}
+                </div>
+            </div>
+
+            <div class="form-group">
+                {{ form.comprobante.label }}
+                {{ form.comprobante(class="form-control", placeholder="Numero de referencia o comprobante") }}
+            </div>
+
+            <div class="form-group">
+                {{ form.notas.label }}
+                {{ form.notas(class="form-control", rows="3") }}
+            </div>
+
+            <div class="form-actions">
+                {{ form.submit(class="btn btn-primary") }}
+                <a href="{{ url_for('distribucion.pagos_poliza', poliza_id=poliza.id) }}" class="btn btn-outline">Cancelar</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+</style>
+{% endblock %}

@@ -1,0 +1,823 @@
+{% extends "base.html" %}
+
+{% block title %}Extractor - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Extractor de PDFs</h1>
+    <p class="text-muted">Extrae pólizas de seguros de tus cuentas de Gmail</p>
+</div>
+
+<div class="grid-2">
+    <!-- Panel de Cuentas Gmail -->
+    <div class="card">
+        <div class="card-header">
+            <h2>Cuentas de Gmail</h2>
+        </div>
+        <div class="card-body">
+            {% if cuentas %}
+            <div class="account-list">
+                {% for cuenta in cuentas %}
+                <div class="account-item">
+                    <div class="account-info">
+                        <span class="account-icon">&#128231;</span>
+                        <div>
+                            <strong>{{ cuenta.correo_gmail }}</strong>
+                            <small class="text-muted">
+                                {% if cuenta.ultimo_escaneo %}
+                                Último: {{ cuenta.ultimo_escaneo.strftime('%d/%m/%Y') }}
+                                {% else %}
+                                Sin escaneos
+                                {% endif %}
+                            </small>
+                        </div>
+                    </div>
+                    <div class="account-actions">
+                        <button class="btn btn-sm btn-outline" onclick="probarCuenta({{ cuenta.id }})">Probar</button>
+                        <form method="POST" action="{{ url_for('extractor.eliminar_cuenta', cuenta_id=cuenta.id) }}" style="display: inline;" onsubmit="return confirm('¿Eliminar esta cuenta?')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-danger">&#128465;</button>
+                        </form>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-muted">No tienes cuentas de Gmail configuradas.</p>
+            {% endif %}
+
+            <hr>
+
+            <h3>Agregar Nueva Cuenta</h3>
+            <form method="POST" action="{{ url_for('extractor.agregar_cuenta') }}" autocomplete="off">
+                {{ form_cuenta.hidden_tag() }}
+                <div class="form-group">
+                    {{ form_cuenta.correo_gmail(class="form-control", placeholder="usuario@gmail.com", autocomplete="new-email") }}
+                </div>
+                <div class="form-group">
+                    {{ form_cuenta.contrasena_app(class="form-control", placeholder="Contraseña de Aplicación", autocomplete="new-password") }}
+                </div>
+                <button type="submit" class="btn btn-secondary">Agregar Cuenta</button>
+            </form>
+
+            <div class="help-text">
+                <p><strong>¿Cómo obtener una Contraseña de Aplicación?</strong></p>
+                <ol>
+                    <li>Activa la verificación en 2 pasos en tu cuenta de Google</li>
+                    <li>Ve a Seguridad > Contraseñas de aplicaciones</li>
+                    <li>Genera una contraseña para "Correo"</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+
+    <!-- Panel de Escaneo -->
+    <div class="card">
+        <div class="card-header">
+            <h2>{% if escaneo_activo %}Escaneo en Progreso{% else %}Iniciar Escaneo{% endif %}</h2>
+            <button type="button" class="btn btn-sm btn-danger" id="btn-reset-global" onclick="resetearTodo()" title="Detener escaneo y limpiar">
+                &#9632; Reset
+            </button>
+        </div>
+        <div class="card-body">
+            {% if escaneo_activo %}
+            <!-- Mostrar progreso del escaneo activo -->
+            <div id="escaneo-progreso" data-escaneo-id="{{ escaneo_activo.id }}">
+                <!-- Estado del escaneo -->
+                <div class="estado-banner" id="estado-banner">
+                    <div class="estado-indicador" id="estado-indicador">
+                        <span class="estado-icono ejecutando" id="icono-ejecutando">&#9654;</span>
+                        <span class="estado-icono pausado oculto" id="icono-pausado">&#10074;&#10074;</span>
+                        <span class="estado-texto" id="estado-texto">Escaneando...</span>
+                    </div>
+                    <div class="estado-detalle" id="estado-detalle">
+                        <span id="progreso-correo">-</span>
+                    </div>
+                </div>
+
+                {% if escaneo_activo.es_multi_cuenta %}
+                <div class="multi-cuenta-info">
+                    <span class="badge badge-primary">Multi-cuenta</span>
+                    <span id="cuenta-progreso">Procesando...</span>
+                </div>
+                {% endif %}
+
+                <div class="progress-container">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progress-fill" style="width: 0%;"></div>
+                    </div>
+                    <div class="progress-texto" id="progress-texto">Iniciando...</div>
+                </div>
+
+                <div class="scan-stats">
+                    <div class="scan-stat">
+                        <span class="scan-stat-value" id="correos-escaneados">{{ escaneo_activo.correos_escaneados or 0 }}</span>
+                        <span class="scan-stat-label">Correos escaneados</span>
+                    </div>
+                    <div class="scan-stat">
+                        <span class="scan-stat-value" id="pdfs-descargados">{{ escaneo_activo.pdfs_descargados or 0 }}</span>
+                        <span class="scan-stat-label">PDFs descargados</span>
+                    </div>
+                </div>
+
+                <div class="log-container" id="log-container">
+                    <div class="log-entry">Escaneo en progreso...</div>
+                </div>
+
+                <!-- Controles del escaneo -->
+                <div class="controles-escaneo" id="controles-escaneo">
+                    <button type="button" class="btn btn-warning" id="btn-pausar" onclick="pausarEscaneo()">
+                        &#10074;&#10074; Pausar
+                    </button>
+                    <button type="button" class="btn btn-success oculto" id="btn-reanudar" onclick="reanudarEscaneo()">
+                        &#9654; Reanudar
+                    </button>
+                    <button type="button" class="btn btn-danger" id="btn-detener" onclick="detenerYRestablecer()">
+                        &#9632; Detener
+                    </button>
+                </div>
+            </div>
+
+            {% else %}
+            <!-- Formulario para iniciar escaneo -->
+            {% if cuentas %}
+            <form method="POST" action="{{ url_for('extractor.iniciar_escaneo') }}">
+                {{ form_escaneo.hidden_tag() }}
+
+                <div class="form-group">
+                    <label>Cuentas de Gmail</label>
+                    <div class="checkbox-header">
+                        <label class="checkbox-group">
+                            <input type="checkbox" id="seleccionar-todas" class="checkbox">
+                            <span>Seleccionar todas</span>
+                        </label>
+                        <span class="cuentas-contador" id="cuentas-contador">0 seleccionadas</span>
+                    </div>
+                    <div class="cuentas-checkboxes">
+                        {% for cuenta in cuentas %}
+                        <label class="cuenta-checkbox">
+                            <input type="checkbox" name="cuenta_ids" value="{{ cuenta.id }}" class="checkbox cuenta-check">
+                            <span class="cuenta-label">
+                                <strong>{{ cuenta.correo_gmail }}</strong>
+                                <small>{% if cuenta.ultimo_escaneo %}Último: {{ cuenta.ultimo_escaneo.strftime('%d/%m') }}{% else %}Nunca escaneada{% endif %}</small>
+                            </span>
+                        </label>
+                        {% endfor %}
+                    </div>
+                    <small class="form-text">Máximo 5 cuentas por escaneo</small>
+                </div>
+
+                <div class="form-group">
+                    <label>Palabras clave (una por línea)</label>
+                    {{ form_escaneo.palabras_clave(class="form-control", rows="5") }}
+                    <small class="form-text">Deja vacío para descargar todos los PDFs</small>
+                </div>
+
+                <div class="form-group">
+                    <label>Carpetas</label>
+                    {{ form_escaneo.carpetas(class="form-control") }}
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Fecha desde</label>
+                        {{ form_escaneo.fecha_desde(class="form-control", type="date") }}
+                    </div>
+                    <div class="form-group half">
+                        <label>Fecha hasta</label>
+                        {{ form_escaneo.fecha_hasta(class="form-control", type="date") }}
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-block" id="btn-iniciar">
+                    &#128269; Iniciar Escaneo
+                </button>
+            </form>
+            {% else %}
+            <div class="empty-state">
+                <p>Agrega al menos una cuenta de Gmail para iniciar un escaneo.</p>
+            </div>
+            {% endif %}
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Historial -->
+<div class="card">
+    <div class="card-header">
+        <h2>Historial Reciente</h2>
+        <a href="{{ url_for('extractor.historial') }}" class="btn btn-sm btn-outline">Ver todo</a>
+    </div>
+    <div class="card-body">
+        {% if historial %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Cuentas</th>
+                    <th>Estado</th>
+                    <th>Correos</th>
+                    <th>PDFs</th>
+                    <th>Duración</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for escaneo in historial %}
+                <tr>
+                    <td>{{ escaneo.fecha_inicio.strftime('%d/%m/%Y %H:%M') }}</td>
+                    <td>
+                        {% if escaneo.es_multi_cuenta %}
+                            <span class="badge badge-primary">{{ escaneo.obtener_lista_cuentas()|length }} cuentas</span>
+                        {% else %}
+                            {{ escaneo.cuenta_gmail.correo_gmail if escaneo.cuenta_gmail else '-' }}
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge badge-{{ 'success' if escaneo.estado == 'completado' else 'warning' if escaneo.estado == 'en_progreso' else 'danger' }}">
+                            {{ escaneo.estado }}
+                        </span>
+                    </td>
+                    <td>{{ escaneo.correos_escaneados or 0 }}</td>
+                    <td>{{ escaneo.pdfs_descargados or 0 }}</td>
+                    <td>
+                        {% if escaneo.fecha_fin %}
+                            {{ ((escaneo.fecha_fin - escaneo.fecha_inicio).total_seconds() / 60)|int }} min
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-muted text-center">No hay escaneos registrados</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.checkbox-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem;
+    background: var(--light);
+    border-radius: var(--radius-sm);
+    margin-bottom: 0.5rem;
+}
+
+.cuentas-contador {
+    font-size: 0.85rem;
+    color: var(--gray);
+}
+
+.cuentas-checkboxes {
+    border: 1px solid var(--gray-light);
+    border-radius: var(--radius-sm);
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.cuenta-checkbox {
+    display: flex;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--gray-light);
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.cuenta-checkbox:last-child {
+    border-bottom: none;
+}
+
+.cuenta-checkbox:hover {
+    background: var(--light);
+}
+
+.cuenta-checkbox input {
+    margin-right: 1rem;
+}
+
+.cuenta-label {
+    display: flex;
+    flex-direction: column;
+}
+
+.cuenta-label small {
+    color: var(--gray);
+}
+
+.multi-cuenta-info {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    padding: 0.75rem;
+    background: var(--light);
+    border-radius: var(--radius-sm);
+}
+
+/* Estado del escaneo */
+.estado-banner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    border-radius: var(--radius-sm);
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.estado-banner.pausado {
+    background: linear-gradient(135deg, #f5af19 0%, #f12711 100%);
+}
+
+.estado-banner.error {
+    background: linear-gradient(135deg, #c0392b 0%, #8e44ad 100%);
+    animation: none;
+}
+
+.estado-banner.deteniendo {
+    background: linear-gradient(135deg, #7f8c8d 0%, #2c3e50 100%);
+    animation: pulse 1s infinite;
+}
+
+.log-entry.log-error {
+    color: #e74c3c;
+    font-weight: bold;
+    background: rgba(231, 76, 60, 0.1);
+    padding: 0.5rem;
+    border-radius: 4px;
+}
+
+.estado-indicador {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.estado-icono {
+    font-size: 1.2rem;
+}
+
+.estado-icono.ejecutando {
+    animation: pulse 1s infinite;
+}
+
+.estado-texto {
+    font-weight: 600;
+    font-size: 1.1rem;
+}
+
+.estado-detalle {
+    font-size: 0.9rem;
+    opacity: 0.9;
+}
+
+/* Barra de progreso mejorada */
+.progress-container {
+    margin-bottom: 1rem;
+}
+
+.progress-bar {
+    height: 8px;
+    background: var(--gray-light);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 0.5rem;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary), var(--accent));
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.progress-fill.pausado {
+    background: var(--warning);
+    animation: none;
+}
+
+.progress-texto {
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--gray);
+}
+
+/* Controles del escaneo */
+.controles-escaneo {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--gray-light);
+}
+
+.controles-escaneo .btn {
+    flex: 1;
+    max-width: 150px;
+}
+
+/* Utilidades */
+.oculto {
+    display: none !important;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Manejo de checkboxes de cuentas
+document.addEventListener('DOMContentLoaded', function() {
+    const checkboxes = document.querySelectorAll('.cuenta-check');
+    const selectAll = document.getElementById('seleccionar-todas');
+    const contador = document.getElementById('cuentas-contador');
+    const btnIniciar = document.getElementById('btn-iniciar');
+
+    function actualizarContador() {
+        const seleccionadas = document.querySelectorAll('.cuenta-check:checked').length;
+        if (contador) {
+            contador.textContent = seleccionadas + ' seleccionada' + (seleccionadas !== 1 ? 's' : '');
+        }
+        if (btnIniciar) {
+            btnIniciar.disabled = seleccionadas === 0;
+            if (seleccionadas > 1) {
+                btnIniciar.innerHTML = '&#128269; Iniciar Escaneo Multi-Cuenta (' + seleccionadas + ')';
+            } else {
+                btnIniciar.innerHTML = '&#128269; Iniciar Escaneo';
+            }
+        }
+    }
+
+    if (checkboxes.length > 0) {
+        checkboxes.forEach(cb => {
+            cb.addEventListener('change', function() {
+                actualizarContador();
+                // Actualizar "seleccionar todas"
+                if (selectAll) {
+                    selectAll.checked = document.querySelectorAll('.cuenta-check:checked').length === checkboxes.length;
+                }
+            });
+        });
+
+        if (selectAll) {
+            selectAll.addEventListener('change', function() {
+                checkboxes.forEach(cb => cb.checked = this.checked);
+                actualizarContador();
+            });
+        }
+
+        actualizarContador();
+    }
+});
+
+{% if escaneo_activo %}
+// Actualizar estado del escaneo cada 1 segundo
+const escaneoId = {{ escaneo_activo.id }};
+const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+let estaPausado = false;
+const intervalo = setInterval(actualizarEstado, 1000);
+
+function actualizarEstado() {
+    fetch(`/extractor/estado/${escaneoId}`)
+        .then(response => response.json())
+        .then(data => {
+            // Actualizar contadores
+            document.getElementById('correos-escaneados').textContent = data.correos_escaneados;
+            document.getElementById('pdfs-descargados').textContent = data.pdfs_descargados;
+
+            // Actualizar barra de progreso
+            if (data.total_correos_carpeta > 0) {
+                const porcentaje = Math.round((data.correo_actual / data.total_correos_carpeta) * 100);
+                document.getElementById('progress-fill').style.width = porcentaje + '%';
+                document.getElementById('progress-texto').textContent =
+                    `Correo ${data.correo_actual} de ${data.total_correos_carpeta} (${porcentaje}%)`;
+                document.getElementById('progreso-correo').textContent =
+                    `${data.correo_actual}/${data.total_correos_carpeta}`;
+            }
+
+            // Actualizar info multi-cuenta
+            if (data.es_multi_cuenta) {
+                const progresoEl = document.getElementById('cuenta-progreso');
+                if (progresoEl && data.cuenta_actual) {
+                    progresoEl.textContent = `Cuenta ${data.cuenta_index}/${data.total_cuentas}: ${data.cuenta_actual}`;
+                }
+            }
+
+            // Actualizar estado visual (pausado/ejecutando)
+            actualizarEstadoVisual(data.pausado);
+
+            // Actualizar logs
+            const logContainer = document.getElementById('log-container');
+            logContainer.innerHTML = '';
+            data.logs.forEach(log => {
+                const entry = document.createElement('div');
+                entry.className = 'log-entry';
+                entry.textContent = `[${log.timestamp}] ${log.mensaje}`;
+                logContainer.appendChild(entry);
+            });
+            logContainer.scrollTop = logContainer.scrollHeight;
+
+            // Verificar si terminó
+            if (data.estado !== 'en_progreso') {
+                clearInterval(intervalo);
+
+                // Mostrar mensaje de error si lo hay
+                if (data.estado === 'error' && data.mensaje_error) {
+                    mostrarError(data.mensaje_error);
+                }
+
+                setTimeout(() => location.reload(), 2000);
+            }
+        })
+        .catch(err => console.error('Error actualizando estado:', err));
+}
+
+function actualizarEstadoVisual(pausado) {
+    const banner = document.getElementById('estado-banner');
+    const textoEstado = document.getElementById('estado-texto');
+    const iconoEjecutando = document.getElementById('icono-ejecutando');
+    const iconoPausado = document.getElementById('icono-pausado');
+    const progressFill = document.getElementById('progress-fill');
+    const btnPausar = document.getElementById('btn-pausar');
+    const btnReanudar = document.getElementById('btn-reanudar');
+
+    if (pausado) {
+        banner.classList.add('pausado');
+        textoEstado.textContent = 'Pausado';
+        iconoEjecutando.classList.add('oculto');
+        iconoPausado.classList.remove('oculto');
+        progressFill.classList.add('pausado');
+        btnPausar.classList.add('oculto');
+        btnReanudar.classList.remove('oculto');
+    } else {
+        banner.classList.remove('pausado');
+        textoEstado.textContent = 'Escaneando...';
+        iconoEjecutando.classList.remove('oculto');
+        iconoPausado.classList.add('oculto');
+        progressFill.classList.remove('pausado');
+        btnPausar.classList.remove('oculto');
+        btnReanudar.classList.add('oculto');
+    }
+    estaPausado = pausado;
+}
+
+function pausarEscaneo() {
+    fetch(`/extractor/pausar/${escaneoId}`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': csrfToken,
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.exito) {
+            actualizarEstadoVisual(true);
+        } else {
+            alert('Error: ' + data.mensaje);
+        }
+    })
+    .catch(err => alert('Error al pausar: ' + err));
+}
+
+function reanudarEscaneo() {
+    fetch(`/extractor/reanudar/${escaneoId}`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': csrfToken,
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.exito) {
+            actualizarEstadoVisual(false);
+        } else {
+            alert('Error: ' + data.mensaje);
+        }
+    })
+    .catch(err => alert('Error al reanudar: ' + err));
+}
+
+function detenerYRestablecer() {
+    if (!confirm('¿Detener el escaneo? Los archivos descargados se conservarán.')) {
+        return;
+    }
+
+    // Detener intervalo de actualizacion
+    clearInterval(intervalo);
+
+    // Deshabilitar todos los botones de control
+    const btnPausar = document.getElementById('btn-pausar');
+    const btnReanudar = document.getElementById('btn-reanudar');
+    const btnDetener = document.getElementById('btn-detener');
+    const btnReset = document.getElementById('btn-reset-global');
+
+    if (btnPausar) btnPausar.disabled = true;
+    if (btnReanudar) btnReanudar.disabled = true;
+    if (btnDetener) {
+        btnDetener.disabled = true;
+        btnDetener.innerHTML = '&#8987; Deteniendo...';
+    }
+    if (btnReset) btnReset.disabled = true;
+
+    // Mostrar estado de detencion en la UI
+    const banner = document.getElementById('estado-banner');
+    if (banner) {
+        banner.classList.remove('pausado');
+        banner.classList.add('deteniendo');
+        banner.innerHTML = `
+            <div class="estado-indicador">
+                <span class="estado-icono">&#8987;</span>
+                <span class="estado-texto">Deteniendo escaneo...</span>
+            </div>
+            <div class="estado-detalle">Restableciendo página</div>
+        `;
+    }
+
+    // Ocultar controles y log
+    const controles = document.getElementById('controles-escaneo');
+    const logContainer = document.getElementById('log-container');
+    if (controles) controles.style.opacity = '0.5';
+    if (logContainer) logContainer.innerHTML = '<div class="log-entry">Deteniendo proceso...</div>';
+
+    // Llamar al endpoint para detener
+    fetch(`/extractor/detener/${escaneoId}`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': csrfToken,
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => {
+        // Recargar la pagina para mostrar formulario limpio
+        setTimeout(() => {
+            window.location.reload();
+        }, 500);
+    })
+    .catch(err => {
+        console.error('Error al detener:', err);
+        window.location.reload();
+    });
+}
+
+function mostrarError(mensaje) {
+    const banner = document.getElementById('estado-banner');
+    banner.classList.add('error');
+    banner.innerHTML = `
+        <div class="estado-indicador">
+            <span class="estado-icono">&#9888;</span>
+            <span class="estado-texto">Error en el escaneo</span>
+        </div>
+        <div class="estado-detalle">${mensaje}</div>
+    `;
+
+    // También mostrar alerta
+    const logContainer = document.getElementById('log-container');
+    const errorEntry = document.createElement('div');
+    errorEntry.className = 'log-entry log-error';
+    errorEntry.textContent = `ERROR: ${mensaje}`;
+    logContainer.appendChild(errorEntry);
+}
+
+// Ejecutar inmediatamente para obtener estado inicial
+actualizarEstado();
+{% endif %}
+
+function probarCuenta(cuentaId) {
+    fetch(`/extractor/cuenta/probar/${cuentaId}`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        alert(data.exito ? 'Conexión exitosa' : 'Error: ' + data.mensaje);
+    });
+}
+
+function resetearFormulario() {
+    // Desmarcar todas las cuentas
+    const checkboxes = document.querySelectorAll('.cuenta-check');
+    checkboxes.forEach(cb => cb.checked = false);
+
+    // Desmarcar "seleccionar todas"
+    const selectAll = document.getElementById('seleccionar-todas');
+    if (selectAll) selectAll.checked = false;
+
+    // Limpiar palabras clave
+    const palabrasClave = document.querySelector('textarea[name="palabras_clave"]');
+    if (palabrasClave) palabrasClave.value = '';
+
+    // Resetear carpetas al valor por defecto
+    const carpetas = document.querySelector('select[name="carpetas"]');
+    if (carpetas) carpetas.selectedIndex = 0;
+
+    // Limpiar fechas
+    const fechaDesde = document.querySelector('input[name="fecha_desde"]');
+    const fechaHasta = document.querySelector('input[name="fecha_hasta"]');
+    if (fechaDesde) fechaDesde.value = '';
+    if (fechaHasta) fechaHasta.value = '';
+
+    // Limpiar campos de cuenta Gmail
+    const correoGmail = document.querySelector('input[name="correo_gmail"]');
+    const contrasenaApp = document.querySelector('input[name="contrasena_app"]');
+    if (correoGmail) correoGmail.value = '';
+    if (contrasenaApp) contrasenaApp.value = '';
+
+    // Actualizar contador
+    const contador = document.getElementById('cuentas-contador');
+    if (contador) contador.textContent = '0 seleccionadas';
+
+    // Actualizar boton
+    const btnIniciar = document.getElementById('btn-iniciar');
+    if (btnIniciar) {
+        btnIniciar.disabled = true;
+        btnIniciar.innerHTML = '&#128269; Iniciar Escaneo';
+    }
+}
+
+// Limpiar campos de cuenta Gmail al cargar la pagina (evitar autocompletado)
+document.addEventListener('DOMContentLoaded', function() {
+    const correoGmail = document.querySelector('input[name="correo_gmail"]');
+    const contrasenaApp = document.querySelector('input[name="contrasena_app"]');
+    if (correoGmail) correoGmail.value = '';
+    if (contrasenaApp) contrasenaApp.value = '';
+});
+
+function resetearTodo() {
+    const btnReset = document.getElementById('btn-reset-global');
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+
+    // Cambiar estado del boton mientras procesa
+    btnReset.disabled = true;
+    btnReset.innerHTML = '&#8987; Deteniendo...';
+
+    {% if escaneo_activo %}
+    // Hay escaneo activo - detenerlo primero
+    const escaneoIdReset = {{ escaneo_activo.id }};
+
+    // Detener intervalo de actualizacion si existe
+    if (typeof intervalo !== 'undefined') {
+        clearInterval(intervalo);
+    }
+
+    // Mostrar estado de detencion en la UI
+    const banner = document.getElementById('estado-banner');
+    if (banner) {
+        banner.classList.remove('pausado');
+        banner.classList.add('deteniendo');
+        banner.innerHTML = `
+            <div class="estado-indicador">
+                <span class="estado-icono">&#8987;</span>
+                <span class="estado-texto">Deteniendo escaneo...</span>
+            </div>
+            <div class="estado-detalle">Por favor espere</div>
+        `;
+    }
+
+    // Llamar al endpoint para detener
+    fetch(`/extractor/detener/${escaneoIdReset}`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': csrfToken,
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => {
+        // Recargar la pagina para mostrar estado actualizado
+        setTimeout(() => {
+            window.location.reload();
+        }, 1000);
+    })
+    .catch(err => {
+        console.error('Error al detener:', err);
+        // Recargar de todos modos
+        window.location.reload();
+    });
+
+    {% else %}
+    // No hay escaneo activo - solo resetear formulario
+    resetearFormulario();
+    btnReset.disabled = false;
+    btnReset.innerHTML = '&#9632; Reset';
+    {% endif %}
+}
+</script>
+{% endblock %}

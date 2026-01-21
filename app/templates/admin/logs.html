@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Logs de Actividad - Administración{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Logs de Actividad</h1>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <form method="GET" class="filter-form">
+            <div class="filter-group">
+                <label>Acción:</label>
+                <select name="accion" class="form-control">
+                    <option value="">Todas</option>
+                    {% for accion in acciones %}
+                    <option value="{{ accion }}" {% if filtro_accion == accion %}selected{% endif %}>{{ accion }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Usuario:</label>
+                <input type="text" name="usuario" class="form-control" placeholder="Correo..." value="{{ filtro_usuario }}">
+            </div>
+            <button type="submit" class="btn btn-outline">Filtrar</button>
+        </form>
+    </div>
+    <div class="card-body">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Usuario</th>
+                    <th>Acción</th>
+                    <th>Detalle</th>
+                    <th>IP</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in logs.items %}
+                <tr>
+                    <td>{{ log.fecha.strftime('%d/%m/%Y %H:%M:%S') }}</td>
+                    <td>{{ log.usuario.correo if log.usuario else 'Sistema' }}</td>
+                    <td><span class="badge badge-secondary">{{ log.accion }}</span></td>
+                    <td>{{ (log.detalle or '-')[:50] }}</td>
+                    <td><small>{{ log.direccion_ip or '-' }}</small></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        {% if logs.pages > 1 %}
+        <div class="pagination">
+            {% if logs.has_prev %}
+            <a href="{{ url_for('admin.logs', pagina=logs.prev_num, accion=filtro_accion, usuario=filtro_usuario) }}" class="btn btn-sm btn-outline">&laquo; Anterior</a>
+            {% endif %}
+
+            <span class="pagination-info">Página {{ logs.page }} de {{ logs.pages }}</span>
+
+            {% if logs.has_next %}
+            <a href="{{ url_for('admin.logs', pagina=logs.next_num, accion=filtro_accion, usuario=filtro_usuario) }}" class="btn btn-sm btn-outline">Siguiente &raquo;</a>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
