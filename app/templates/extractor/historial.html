@@ -21,7 +21,7 @@
                     <th>Estado</th>
                     <th>Correos</th>
                     <th>PDFs</th>
-                    <th>Palabras Clave</th>
+                    <th>Acciones</th>
                 </tr>
             </thead>
             <tbody>
@@ -39,11 +39,9 @@
                     <td>{{ escaneo.correos_escaneados or 0 }}</td>
                     <td>{{ escaneo.pdfs_descargados or 0 }}</td>
                     <td>
-                        {% if escaneo.palabras_clave %}
-                            {{ escaneo.palabras_clave[:50] }}{% if escaneo.palabras_clave|length > 50 %}...{% endif %}
-                        {% else %}
-                            <span class="text-muted">Todas</span>
-                        {% endif %}
+                        <a href="{{ url_for('extractor.ver_logs_escaneo', escaneo_id=escaneo.id) }}" class="btn btn-sm btn-outline" title="Ver logs detallados">
+                            Logs
+                        </a>
                     </td>
                 </tr>
                 {% if escaneo.estado == 'error' and escaneo.mensaje_error %}

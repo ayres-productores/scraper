@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+
+{% block title %}Clientes a Reactivar - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Clientes a Reactivar</h1>
+    <div class="header-actions">
+        <form method="POST" action="{{ url_for('distribucion.evaluar_clientes') }}" style="display: inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-outline">Evaluar Clientes</button>
+        </form>
+        <a href="{{ url_for('distribucion.clientes') }}" class="btn btn-primary">Ver Todos</a>
+    </div>
+</div>
+
+<!-- Estadisticas -->
+<div class="grid-4">
+    <div class="card card-compact">
+        <div class="card-body text-center">
+            <div class="stat-number">{{ estadisticas.total_clientes }}</div>
+            <div class="stat-label">Total Clientes</div>
+        </div>
+    </div>
+    <div class="card card-compact stat-success">
+        <div class="card-body text-center">
+            <div class="stat-number">{{ estadisticas.actuales }}</div>
+            <div class="stat-label">Actuales</div>
+            <small class="text-muted">{{ estadisticas.porcentaje_actuales }}%</small>
+        </div>
+    </div>
+    <div class="card card-compact stat-warning">
+        <div class="card-body text-center">
+            <div class="stat-number">{{ estadisticas.no_actuales }}</div>
+            <div class="stat-label">A Reactivar</div>
+        </div>
+    </div>
+    <div class="card card-compact">
+        <div class="card-body text-center">
+            <div class="stat-breakdown">
+                <div><span class="badge badge-outline">{{ estadisticas.por_motivo.sin_comunicacion }}</span> Sin contacto</div>
+                <div><span class="badge badge-outline">{{ estadisticas.por_motivo.sin_poliza_reciente }}</span> Sin poliza</div>
+                <div><span class="badge badge-outline">{{ estadisticas.por_motivo.ambos }}</span> Ambos</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Lista de clientes a reactivar -->
+<div class="card">
+    <div class="card-header">
+        <h2>Clientes que Requieren Seguimiento</h2>
+    </div>
+    <div class="card-body">
+        {% if clientes %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Cliente</th>
+                    <th>Telefono</th>
+                    <th>Motivo</th>
+                    <th>Ultimo Contacto</th>
+                    <th>Ultima Poliza</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for cliente in clientes %}
+                <tr>
+                    <td>
+                        <a href="{{ url_for('distribucion.cliente_detalle', cliente_id=cliente.id) }}">
+                            <strong>{{ cliente.nombre_completo }}</strong>
+                        </a>
+                    </td>
+                    <td>{{ cliente.telefono_whatsapp }}</td>
+                    <td>
+                        {% if cliente.motivo_no_actual == 'sin_comunicacion' %}
+                        <span class="badge badge-warning">Sin contacto 6+ meses</span>
+                        {% elif cliente.motivo_no_actual == 'sin_poliza_reciente' %}
+                        <span class="badge badge-info">Sin poliza reciente</span>
+                        {% elif cliente.motivo_no_actual == 'ambos' %}
+                        <span class="badge badge-danger">Sin contacto ni poliza</span>
+                        {% else %}
+                        <span class="badge badge-secondary">Pendiente evaluar</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if cliente.ultimo_envio %}
+                        {{ cliente.ultimo_envio.strftime('%d/%m/%Y') }}
+                        {% else %}
+                        <span class="text-muted">Nunca</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% set polizas_activas = cliente.polizas.all()|selectattr('estado', 'equalto', 'activa')|list %}
+                        {% set ultima_poliza = polizas_activas|sort(attribute='fecha_vigencia_desde', reverse=true)|first if polizas_activas else none %}
+                        {% if ultima_poliza and ultima_poliza.fecha_vigencia_desde %}
+                        {{ ultima_poliza.fecha_vigencia_desde.strftime('%d/%m/%Y') }}
+                        <br><small class="text-muted">{{ ultima_poliza.tipo_seguro or 'Sin tipo' }}</small>
+                        {% else %}
+                        <span class="text-muted">Sin poliza activa</span>
+                        {% endif %}
+                    </td>
+                    <td class="actions-cell">
+                        <a href="{{ url_for('distribucion.enviar_directo', cliente_id=cliente.id) }}"
+                           class="btn btn-sm btn-success" title="Contactar por WhatsApp" target="_blank">
+                            &#128172;
+                        </a>
+                        <a href="{{ url_for('distribucion.cliente_detalle', cliente_id=cliente.id) }}"
+                           class="btn btn-sm btn-outline" title="Ver detalle">
+                            &#128065;
+                        </a>
+                        <form method="POST" action="{{ url_for('distribucion.marcar_cliente_gestionado', cliente_id=cliente.id) }}"
+                              style="display: inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-primary" title="Marcar como gestionado">
+                                &#10003;
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <span class="empty-icon">&#127881;</span>
+            <h3>Todos los clientes estan al dia</h3>
+            <p>No hay clientes que requieran reactivacion en este momento.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Ayuda -->
+<div class="card">
+    <div class="card-header">
+        <h2>Criterios de Cliente Actual</h2>
+    </div>
+    <div class="card-body">
+        <p>Un cliente se considera <strong>"actual"</strong> cuando cumple <strong>ambos</strong> criterios:</p>
+        <ul>
+            <li><strong>Comunicacion reciente:</strong> Al menos un envio de WhatsApp exitoso en los ultimos 6 meses</li>
+            <li><strong>Poliza vigente:</strong> Al menos una poliza emitida o renovada en el ultimo anio</li>
+        </ul>
+        <p class="text-muted">La evaluacion se ejecuta automaticamente cada dia, o puedes ejecutarla manualmente con el boton "Evaluar Clientes".</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.grid-4 {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.card-compact .card-body {
+    padding: 1rem;
+}
+
+.stat-number {
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.stat-label {
+    font-size: 0.85rem;
+    color: var(--gray);
+    margin-top: 0.25rem;
+}
+
+.stat-success {
+    background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+}
+
+.stat-warning {
+    background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
+}
+
+.stat-breakdown {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.85rem;
+}
+
+.stat-breakdown .badge {
+    min-width: 24px;
+    margin-right: 0.5rem;
+}
+
+.actions-cell {
+    white-space: nowrap;
+}
+
+.actions-cell .btn {
+    margin-right: 0.25rem;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 3rem;
+}
+
+.empty-icon {
+    font-size: 4rem;
+    display: block;
+    margin-bottom: 1rem;
+}
+
+@media (max-width: 992px) {
+    .grid-4 {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 576px) {
+    .grid-4 {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+{% endblock %}

@@ -1,0 +1,1257 @@
+{% extends "base.html" %}
+
+{% block title %}Asignar Poliza Inteligente - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Asignar Poliza Inteligente</h1>
+        <p class="text-muted">Selecciona un PDF y extrae automaticamente los datos de la poliza</p>
+    </div>
+    <div class="header-stats">
+        <span class="badge badge-info">{{ pendientes }} pendientes</span>
+        <span class="badge badge-success">{{ total_asignados }} asignados</span>
+    </div>
+</div>
+
+<div class="asignacion-container">
+    <!-- Panel izquierdo: Lista de archivos -->
+    <div class="panel-archivos">
+        <div class="card">
+            <div class="card-header">
+                <h3>Archivos PDF</h3>
+                <input type="text" id="buscar-archivo" class="form-control form-control-sm" placeholder="Buscar...">
+            </div>
+            <div class="card-body archivo-lista">
+                {% if archivos %}
+                    {% for archivo in archivos %}
+                    <div class="archivo-item" data-id="{{ archivo.id }}" data-nombre="{{ archivo.nombre_archivo }}">
+                        <div class="archivo-icono">
+                            <svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,18V8L14,2M18,20H6V4H13V9H18V20Z"/></svg>
+                        </div>
+                        <div class="archivo-info">
+                            <div class="archivo-nombre">{{ archivo.nombre_archivo[:35] }}{% if archivo.nombre_archivo|length > 35 %}...{% endif %}</div>
+                            <div class="archivo-meta">
+                                {% if archivo.fecha_correo %}{{ archivo.fecha_correo.strftime('%d/%m/%Y') }}{% endif %}
+                                {% if archivo.compania %}<span class="badge badge-sm">{{ archivo.compania.nombre[:15] }}</span>{% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="empty-state">
+                        <p>No hay archivos pendientes de asignar.</p>
+                        <a href="{{ url_for('extractor.index') }}" class="btn btn-primary btn-sm">Ir al Extractor</a>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Panel central: Formulario -->
+    <div class="panel-formulario">
+        <div class="card">
+            <div class="card-header">
+                <h3>Datos de la Poliza</h3>
+                <div id="indicador-confianza" class="confianza-badge" style="display: none;">
+                    <span class="confianza-valor">0%</span>
+                    <span class="confianza-texto">confianza</span>
+                </div>
+            </div>
+            <div class="card-body">
+                <!-- Estado inicial -->
+                <div id="estado-inicial" class="estado-mensaje">
+                    <div class="estado-icono">
+                        <svg viewBox="0 0 24 24" width="48" height="48"><path fill="currentColor" d="M19,20H4C2.89,20 2,19.1 2,18V6C2,4.89 2.89,4 4,4H10L12,6H19A2,2 0 0,1 21,8H21L4,8V18L6.14,10H23.21L20.93,18.5C20.7,19.37 19.92,20 19,20Z"/></svg>
+                    </div>
+                    <p>Selecciona un archivo PDF de la lista para comenzar</p>
+                </div>
+
+                <!-- Cargando -->
+                <div id="estado-cargando" class="estado-mensaje" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>Extrayendo datos del PDF...</p>
+                </div>
+
+                <!-- Formulario de datos -->
+                <form id="formulario-poliza" method="POST" action="{{ url_for('distribucion.guardar_asignacion_inteligente') }}" style="display: none;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="archivo_id" id="archivo_id">
+                    <input type="hidden" name="confianza" id="confianza_valor">
+                    <input type="hidden" name="crear_cliente" id="crear_cliente" value="0">
+                    <input type="hidden" name="correcciones_json" id="correcciones_json" value="[]">
+                    <input type="hidden" name="tiempo_edicion" id="tiempo_edicion" value="0">
+
+                    <!-- Seccion: Cliente -->
+                    <div class="form-section">
+                        <h4>Cliente</h4>
+
+                        <!-- Alerta de cliente sugerido (auto-seleccionado por documento) -->
+                        <div id="alerta-cliente-sugerido" class="alerta-sugerencia" style="display: none;">
+                            <div class="alerta-icono">
+                                <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/></svg>
+                            </div>
+                            <div class="alerta-contenido">
+                                <strong>Cliente encontrado:</strong>
+                                <span id="cliente-sugerido-nombre"></span>
+                                <span class="badge badge-success">Documento coincide</span>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-link" id="btn-cambiar-cliente">Cambiar</button>
+                        </div>
+
+                        <!-- Selector de modo: Existente o Nuevo -->
+                        <div class="cliente-modo-selector" id="cliente-modo-selector">
+                            <label class="modo-opcion">
+                                <input type="radio" name="modo_cliente" value="existente" checked>
+                                <span>Seleccionar cliente existente</span>
+                            </label>
+                            <label class="modo-opcion">
+                                <input type="radio" name="modo_cliente" value="nuevo">
+                                <span>Crear cliente nuevo con datos extraidos</span>
+                            </label>
+                        </div>
+
+                        <!-- Modo: Seleccionar existente -->
+                        <div id="cliente-modo-existente" class="cliente-modo-contenido">
+                            <div class="form-row">
+                                <div class="form-group flex-grow">
+                                    <label for="cliente_id">Asignar a Cliente *</label>
+                                    <select name="cliente_id" id="cliente_id" class="form-control">
+                                        <option value="">Seleccionar cliente...</option>
+                                        {% for cliente in clientes %}
+                                        <option value="{{ cliente.id }}" data-documento="{{ cliente.documento_identidad or '' }}">{{ cliente.nombre_completo }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>&nbsp;</label>
+                                    <button type="button" class="btn btn-outline" id="btn-nuevo-cliente">+ Nuevo</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Modo: Crear nuevo -->
+                        <div id="cliente-modo-nuevo" class="cliente-modo-contenido" style="display: none;">
+                            <div class="form-row">
+                                <div class="form-group flex-grow">
+                                    <label for="cliente_nombre">Nombre Completo *</label>
+                                    <input type="text" name="cliente_nombre" id="cliente_nombre" class="form-control campo-extraido" placeholder="Apellido, Nombre">
+                                </div>
+                                <div class="form-group">
+                                    <label for="cliente_documento">Documento</label>
+                                    <input type="text" name="cliente_documento" id="cliente_documento" class="form-control campo-extraido" placeholder="DNI/CUIT">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="telefono_whatsapp">Telefono WhatsApp</label>
+                                    <input type="text" name="telefono_whatsapp" id="telefono_whatsapp" class="form-control campo-extraido" placeholder="11 1234-5678 (opcional)">
+                                </div>
+                                <div class="form-group">
+                                    <label for="cliente_email">Email</label>
+                                    <input type="email" name="cliente_email" id="cliente_email" class="form-control campo-extraido">
+                                </div>
+                            </div>
+                            <p class="form-help">Los datos se pre-rellenan con la informacion extraida del PDF. Puedes editarlos antes de guardar.</p>
+                        </div>
+                    </div>
+
+                    <!-- Seccion: Datos basicos -->
+                    <div class="form-section">
+                        <h4>Datos de la Poliza</h4>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="numero_poliza">Numero de Poliza</label>
+                                <input type="text" name="numero_poliza" id="numero_poliza" class="form-control campo-extraido">
+                            </div>
+                            <div class="form-group">
+                                <label for="compania_id">Compania</label>
+                                <select name="compania_id" id="compania_id" class="form-control">
+                                    <option value="">Seleccionar...</option>
+                                    {% for compania in companias %}
+                                    <option value="{{ compania.id }}">{{ compania.nombre }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="tipo_seguro">Tipo de Seguro</label>
+                                <select name="tipo_seguro" id="tipo_seguro" class="form-control">
+                                    <option value="">Seleccionar...</option>
+                                    {% for valor, nombre in tipos_seguro %}
+                                    <option value="{{ valor }}">{{ nombre }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="fecha_vigencia_desde">Vigencia Desde</label>
+                                <input type="date" name="fecha_vigencia_desde" id="fecha_vigencia_desde" class="form-control campo-extraido">
+                            </div>
+                            <div class="form-group">
+                                <label for="fecha_vigencia_hasta">Vigencia Hasta</label>
+                                <input type="date" name="fecha_vigencia_hasta" id="fecha_vigencia_hasta" class="form-control campo-extraido">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="prima_anual">Prima Total ($)</label>
+                                <input type="number" step="0.01" name="prima_anual" id="prima_anual" class="form-control campo-extraido">
+                            </div>
+                            <div class="form-group">
+                                <label for="suma_asegurada">Suma Asegurada ($)</label>
+                                <input type="number" step="0.01" name="suma_asegurada" id="suma_asegurada" class="form-control campo-extraido">
+                            </div>
+                            <div class="form-group">
+                                <label for="deducible">Deducible ($)</label>
+                                <input type="number" step="0.01" name="deducible" id="deducible" class="form-control">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Seccion: Asegurado -->
+                    <div class="form-section">
+                        <h4>Datos del Asegurado</h4>
+                        <div class="form-row">
+                            <div class="form-group flex-grow">
+                                <label for="asegurado_nombre">Nombre Completo</label>
+                                <input type="text" name="asegurado_nombre" id="asegurado_nombre" class="form-control campo-extraido">
+                            </div>
+                            <div class="form-group">
+                                <label for="asegurado_documento">DNI/CUIT</label>
+                                <input type="text" name="asegurado_documento" id="asegurado_documento" class="form-control campo-extraido">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group flex-grow">
+                                <label for="asegurado_direccion">Direccion</label>
+                                <input type="text" name="asegurado_direccion" id="asegurado_direccion" class="form-control">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="asegurado_telefono">Telefono</label>
+                                <input type="text" name="asegurado_telefono" id="asegurado_telefono" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label for="asegurado_email">Email</label>
+                                <input type="email" name="asegurado_email" id="asegurado_email" class="form-control">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Seccion: Bien Asegurado -->
+                    <div class="form-section">
+                        <h4>Bien Asegurado</h4>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="bien_asegurado_tipo">Tipo de Bien</label>
+                                <select name="bien_asegurado_tipo" id="bien_asegurado_tipo" class="form-control">
+                                    <option value="">Seleccionar...</option>
+                                    {% for valor, nombre in tipos_bien %}
+                                    <option value="{{ valor }}">{{ nombre }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="form-group flex-grow">
+                                <label for="bien_asegurado_descripcion">Descripcion</label>
+                                <input type="text" name="bien_asegurado_descripcion" id="bien_asegurado_descripcion" class="form-control">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Seccion: Vehiculo (condicional) -->
+                    <div class="form-section seccion-vehiculo" id="seccion-vehiculo" style="display: none;">
+                        <h4>Datos del Vehiculo</h4>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="vehiculo_marca">Marca</label>
+                                <input type="text" name="vehiculo_marca" id="vehiculo_marca" class="form-control campo-extraido">
+                            </div>
+                            <div class="form-group">
+                                <label for="vehiculo_modelo">Modelo</label>
+                                <input type="text" name="vehiculo_modelo" id="vehiculo_modelo" class="form-control campo-extraido">
+                            </div>
+                            <div class="form-group">
+                                <label for="vehiculo_anio">Ano</label>
+                                <input type="number" name="vehiculo_anio" id="vehiculo_anio" class="form-control campo-extraido" min="1900" max="2100">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="vehiculo_patente">Patente</label>
+                                <input type="text" name="vehiculo_patente" id="vehiculo_patente" class="form-control campo-extraido" style="text-transform: uppercase;">
+                            </div>
+                            <div class="form-group">
+                                <label for="vehiculo_chasis">Chasis</label>
+                                <input type="text" name="vehiculo_chasis" id="vehiculo_chasis" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label for="vehiculo_motor">Motor</label>
+                                <input type="text" name="vehiculo_motor" id="vehiculo_motor" class="form-control">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="vehiculo_color">Color</label>
+                                <input type="text" name="vehiculo_color" id="vehiculo_color" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label for="vehiculo_uso">Uso</label>
+                                <input type="text" name="vehiculo_uso" id="vehiculo_uso" class="form-control">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Seccion: Inmueble (condicional) -->
+                    <div class="form-section seccion-inmueble" id="seccion-inmueble" style="display: none;">
+                        <h4>Datos del Inmueble</h4>
+                        <div class="form-row">
+                            <div class="form-group flex-grow">
+                                <label for="inmueble_direccion">Direccion del Inmueble</label>
+                                <input type="text" name="inmueble_direccion" id="inmueble_direccion" class="form-control">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="inmueble_tipo">Tipo de Inmueble</label>
+                                <input type="text" name="inmueble_tipo" id="inmueble_tipo" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label for="inmueble_superficie">Superficie (m2)</label>
+                                <input type="number" step="0.01" name="inmueble_superficie" id="inmueble_superficie" class="form-control">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Seccion: Inmobiliaria (solo para incendio/hogar) -->
+                    <div class="form-section seccion-inmobiliaria" id="seccion-inmobiliaria" style="display: none;">
+                        <h4>&#127970; Inmobiliaria Administradora</h4>
+                        <p class="text-muted form-help">Asigna una inmobiliaria para recibir notificaciones automaticas sobre esta poliza.</p>
+                        <div class="form-row">
+                            <div class="form-group flex-grow">
+                                <label for="inmobiliaria_id">Inmobiliaria</label>
+                                <select name="inmobiliaria_id" id="inmobiliaria_id" class="form-control">
+                                    <option value="">Sin inmobiliaria asignada</option>
+                                    {% for inmobiliaria in inmobiliarias %}
+                                    <option value="{{ inmobiliaria.id }}">{{ inmobiliaria.nombre }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>&nbsp;</label>
+                                <a href="{{ url_for('distribucion.nueva_inmobiliaria') }}" class="btn btn-outline" target="_blank">+ Nueva</a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Seccion: Pago -->
+                    <div class="form-section">
+                        <h4>Forma de Pago</h4>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="forma_pago">Forma de Pago</label>
+                                <select name="forma_pago" id="forma_pago" class="form-control">
+                                    <option value="">Seleccionar...</option>
+                                    {% for valor, nombre in formas_pago %}
+                                    <option value="{{ valor }}">{{ nombre }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="cantidad_cuotas">Cantidad de Cuotas</label>
+                                <input type="number" name="cantidad_cuotas" id="cantidad_cuotas" class="form-control" min="1" max="12">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Seccion: Productor -->
+                    <div class="form-section">
+                        <h4>Productor</h4>
+                        <div class="form-row">
+                            <div class="form-group flex-grow">
+                                <label for="productor_nombre">Nombre</label>
+                                <input type="text" name="productor_nombre" id="productor_nombre" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label for="productor_telefono">Telefono</label>
+                                <input type="text" name="productor_telefono" id="productor_telefono" class="form-control">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Notas -->
+                    <div class="form-section">
+                        <div class="form-group">
+                            <label for="notas">Notas</label>
+                            <textarea name="notas" id="notas" class="form-control" rows="2"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="requiere_revision" id="requiere_revision">
+                                Marcar para revision manual
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Botones -->
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary btn-lg">Guardar Poliza</button>
+                        <button type="submit" name="continuar" value="1" class="btn btn-success">Guardar y Continuar</button>
+                        <button type="button" class="btn btn-outline" id="btn-limpiar">Limpiar</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Panel derecho: Vista previa -->
+    <div class="panel-preview">
+        <div class="card">
+            <div class="card-header">
+                <h3>Vista Previa</h3>
+                <button type="button" class="btn btn-sm btn-outline" id="btn-expandir" title="Expandir">
+                    <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M10,21V19H6.41L10.91,14.5L9.5,13.09L5,17.59V14H3V21H10M14.5,10.91L19,6.41V10H21V3H14V5H17.59L13.09,9.5L14.5,10.91Z"/></svg>
+                </button>
+            </div>
+            <div class="card-body preview-container">
+                <div id="preview-placeholder" class="preview-placeholder">
+                    <svg viewBox="0 0 24 24" width="64" height="64"><path fill="currentColor" d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,18V8L14,2M18,20H6V4H13V9H18V20Z"/></svg>
+                    <p>Selecciona un archivo para ver la vista previa</p>
+                </div>
+                <iframe id="pdf-preview" style="display: none;"></iframe>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Nuevo Cliente -->
+<div id="modal-cliente" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Nuevo Cliente Rapido</h3>
+            <button type="button" class="modal-close" id="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label for="nuevo_cliente_nombre">Nombre Completo *</label>
+                <input type="text" id="nuevo_cliente_nombre" class="form-control" placeholder="Ej: Juan Perez">
+            </div>
+            <div class="form-group">
+                <label for="nuevo_cliente_telefono">Telefono WhatsApp</label>
+                <input type="text" id="nuevo_cliente_telefono" class="form-control" placeholder="Ej: 1134567890">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-outline" id="btn-cancelar-cliente">Cancelar</button>
+            <button type="button" class="btn btn-primary" id="btn-guardar-cliente">Crear Cliente</button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.asignacion-container {
+    display: grid;
+    grid-template-columns: 280px 1fr 350px;
+    gap: 1.5rem;
+    height: calc(100vh - 180px);
+}
+
+.panel-archivos .card,
+.panel-formulario .card,
+.panel-preview .card {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.panel-archivos .card-body,
+.panel-formulario .card-body {
+    overflow-y: auto;
+    flex: 1;
+}
+
+/* Lista de archivos */
+.archivo-lista {
+    padding: 0 !important;
+}
+
+.archivo-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--light);
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.archivo-item:hover {
+    background: var(--light);
+}
+
+.archivo-item.selected {
+    background: var(--primary);
+    color: white;
+}
+
+.archivo-item.selected .badge {
+    background: rgba(255,255,255,0.2);
+    color: white;
+}
+
+.archivo-icono {
+    color: var(--danger);
+    flex-shrink: 0;
+}
+
+.archivo-item.selected .archivo-icono {
+    color: white;
+}
+
+.archivo-info {
+    overflow: hidden;
+}
+
+.archivo-nombre {
+    font-size: 0.85rem;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.archivo-meta {
+    font-size: 0.75rem;
+    color: var(--gray);
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.archivo-item.selected .archivo-meta {
+    color: rgba(255,255,255,0.8);
+}
+
+/* Estados */
+.estado-mensaje {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem;
+    color: var(--gray);
+    text-align: center;
+}
+
+.estado-icono {
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+/* Spinner */
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid var(--light);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 1rem;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Formulario */
+.form-section {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--light);
+}
+
+.form-section:last-of-type {
+    border-bottom: none;
+}
+
+.form-section h4 {
+    margin-bottom: 1rem;
+    color: var(--primary);
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.form-row {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.form-row .form-group {
+    flex: 1;
+    margin-bottom: 0;
+}
+
+.form-row .form-group.flex-grow {
+    flex: 2;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-size: 0.8rem;
+    color: var(--dark);
+    font-weight: 500;
+}
+
+.form-control {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.9rem;
+    border: 1px solid var(--gray-light);
+    border-radius: var(--radius);
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.form-control:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+/* Campos extraidos con exito */
+.campo-extraido.tiene-valor {
+    background: #f0fdf4;
+    border-color: #22c55e;
+}
+
+.form-actions {
+    display: flex;
+    gap: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--light);
+    margin-top: 1rem;
+}
+
+/* Indicador de confianza */
+.confianza-badge {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+}
+
+.confianza-badge.nivel-alto {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.confianza-badge.nivel-medio {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.confianza-badge.nivel-bajo {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.confianza-valor {
+    font-weight: 700;
+}
+
+/* Vista previa PDF */
+.preview-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 0 !important;
+}
+
+.preview-placeholder {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--gray);
+    opacity: 0.5;
+}
+
+#pdf-preview {
+    width: 100%;
+    height: 100%;
+    border: none;
+    flex: 1;
+}
+
+/* Modal */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background: white;
+    border-radius: var(--radius);
+    width: 400px;
+    max-width: 90%;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    border-bottom: 1px solid var(--light);
+}
+
+.modal-header h3 {
+    margin: 0;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--gray);
+}
+
+.modal-body {
+    padding: 1rem;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding: 1rem;
+    border-top: 1px solid var(--light);
+}
+
+/* Header stats */
+.header-stats {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+/* Responsive */
+@media (max-width: 1200px) {
+    .asignacion-container {
+        grid-template-columns: 250px 1fr;
+    }
+    .panel-preview {
+        display: none;
+    }
+}
+
+@media (max-width: 768px) {
+    .asignacion-container {
+        grid-template-columns: 1fr;
+        height: auto;
+    }
+    .form-row {
+        flex-direction: column;
+    }
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const archivos = document.querySelectorAll('.archivo-item');
+    const estadoInicial = document.getElementById('estado-inicial');
+    const estadoCargando = document.getElementById('estado-cargando');
+    const formulario = document.getElementById('formulario-poliza');
+    const indicadorConfianza = document.getElementById('indicador-confianza');
+    const pdfPreview = document.getElementById('pdf-preview');
+    const previewPlaceholder = document.getElementById('preview-placeholder');
+    const buscarArchivo = document.getElementById('buscar-archivo');
+
+    let archivoSeleccionado = null;
+
+    // Buscar archivos
+    buscarArchivo.addEventListener('input', function() {
+        const texto = this.value.toLowerCase();
+        archivos.forEach(archivo => {
+            const nombre = archivo.dataset.nombre.toLowerCase();
+            archivo.style.display = nombre.includes(texto) ? 'flex' : 'none';
+        });
+    });
+
+    // Seleccionar archivo
+    archivos.forEach(archivo => {
+        archivo.addEventListener('click', function() {
+            // Quitar seleccion anterior
+            archivos.forEach(a => a.classList.remove('selected'));
+            this.classList.add('selected');
+
+            const archivoId = this.dataset.id;
+            archivoSeleccionado = archivoId;
+
+            // Mostrar cargando
+            estadoInicial.style.display = 'none';
+            formulario.style.display = 'none';
+            estadoCargando.style.display = 'flex';
+            indicadorConfianza.style.display = 'none';
+
+            // Mostrar vista previa
+            previewPlaceholder.style.display = 'none';
+            pdfPreview.style.display = 'block';
+            pdfPreview.src = `/distribucion/api/vista-previa-pdf/${archivoId}`;
+
+            // Extraer datos usando API V2 con formato estructurado
+            fetch(`/distribucion/api/extraer-pdf-v2/${archivoId}`)
+                .then(response => response.json())
+                .then(data => {
+                    estadoCargando.style.display = 'none';
+
+                    if (data.exito) {
+                        // Guardar datos estructurados para tracking
+                        window.datosExtraccionActual = data.datos;
+
+                        // Llenar formulario con datos estructurados
+                        llenarFormularioV2(data.datos);
+                        formulario.style.display = 'block';
+                        mostrarConfianzaV2(data.datos.confianza);
+
+                        // Manejar cliente sugerido
+                        manejarClienteSugerido(data.datos);
+
+                        // Inicializar tracking de correcciones
+                        if (typeof TrackingExtraccion !== 'undefined') {
+                            TrackingExtraccion.inicializar(data.datos, '#formulario-poliza');
+                        }
+                    } else {
+                        alert('Error: ' + data.error);
+                        estadoInicial.style.display = 'flex';
+                    }
+                })
+                .catch(error => {
+                    estadoCargando.style.display = 'none';
+                    estadoInicial.style.display = 'flex';
+                    alert('Error al extraer datos: ' + error);
+                });
+        });
+    });
+
+    // Llenar formulario con datos extraidos
+    function llenarFormulario(datos, resumen) {
+        document.getElementById('archivo_id').value = datos.archivo_id || '';
+        document.getElementById('confianza_valor').value = datos.confianza || 0;
+
+        // Mapeo de campos
+        const campos = {
+            'numero_poliza': datos.numero_poliza,
+            'tipo_seguro': datos.tipo_seguro,
+            'fecha_vigencia_desde': datos.fecha_vigencia_desde,
+            'fecha_vigencia_hasta': datos.fecha_vigencia_hasta,
+            'prima_anual': datos.prima_anual,
+            'suma_asegurada': datos.suma_asegurada,
+            'deducible': datos.deducible,
+            'asegurado_nombre': datos.asegurado_nombre,
+            'asegurado_documento': datos.asegurado_documento,
+            'asegurado_direccion': datos.asegurado_direccion,
+            'asegurado_telefono': datos.asegurado_telefono,
+            'asegurado_email': datos.asegurado_email,
+            'bien_asegurado_tipo': datos.bien_asegurado_tipo,
+            'vehiculo_marca': datos.vehiculo_marca,
+            'vehiculo_modelo': datos.vehiculo_modelo,
+            'vehiculo_anio': datos.vehiculo_anio,
+            'vehiculo_patente': datos.vehiculo_patente,
+            'vehiculo_chasis': datos.vehiculo_chasis,
+            'vehiculo_motor': datos.vehiculo_motor,
+            'vehiculo_color': datos.vehiculo_color,
+            'vehiculo_uso': datos.vehiculo_uso,
+            'inmueble_direccion': datos.inmueble_direccion,
+            'inmueble_tipo': datos.inmueble_tipo,
+            'inmueble_superficie': datos.inmueble_superficie,
+            'forma_pago': datos.forma_pago,
+            'cantidad_cuotas': datos.cantidad_cuotas,
+            'productor_nombre': datos.productor_nombre,
+        };
+
+        // Llenar cada campo
+        Object.entries(campos).forEach(([id, valor]) => {
+            const campo = document.getElementById(id);
+            if (campo && valor !== null && valor !== undefined) {
+                campo.value = valor;
+                if (campo.classList.contains('campo-extraido')) {
+                    campo.classList.add('tiene-valor');
+                }
+            } else if (campo) {
+                campo.value = '';
+                campo.classList.remove('tiene-valor');
+            }
+        });
+
+        // Seleccionar compania si se detecto
+        if (datos.compania_id_sugerida) {
+            document.getElementById('compania_id').value = datos.compania_id_sugerida;
+        }
+
+        // Mostrar/ocultar secciones segun tipo de bien
+        actualizarSeccionesBien(datos.bien_asegurado_tipo);
+
+        // Marcar si requiere revision
+        document.getElementById('requiere_revision').checked = datos.requiere_revision || false;
+    }
+
+    // Mostrar indicador de confianza (legado)
+    function mostrarConfianza(resumen) {
+        indicadorConfianza.style.display = 'flex';
+        indicadorConfianza.querySelector('.confianza-valor').textContent = resumen.confianza_porcentaje + '%';
+
+        indicadorConfianza.classList.remove('nivel-alto', 'nivel-medio', 'nivel-bajo');
+        indicadorConfianza.classList.add('nivel-' + resumen.nivel);
+    }
+
+    // ============================================================
+    // FUNCIONES V2 - Extraccion Predictiva Mejorable
+    // ============================================================
+
+    // Helper para obtener valor de campo estructurado
+    function obtenerValor(campo) {
+        return campo && campo.valor !== null && campo.valor !== undefined ? campo.valor : '';
+    }
+
+    // Llenar formulario con datos estructurados (API V2)
+    function llenarFormularioV2(datos) {
+        document.getElementById('archivo_id').value = datos.meta?.archivo_id || '';
+        document.getElementById('confianza_valor').value = datos.confianza?.global || 0;
+
+        // Datos del cliente (para modo crear nuevo)
+        if (datos.cliente) {
+            document.getElementById('cliente_nombre').value = obtenerValor(datos.cliente.nombre);
+            document.getElementById('cliente_documento').value = obtenerValor(datos.cliente.documento);
+            document.getElementById('telefono_whatsapp').value = obtenerValor(datos.cliente.telefono);
+            document.getElementById('cliente_email').value = obtenerValor(datos.cliente.email);
+        }
+
+        // Datos de la poliza
+        if (datos.poliza) {
+            setFieldValue('numero_poliza', obtenerValor(datos.poliza.numero_poliza));
+            setFieldValue('tipo_seguro', obtenerValor(datos.poliza.tipo_seguro));
+            setFieldValue('fecha_vigencia_desde', obtenerValor(datos.poliza.fecha_vigencia_desde));
+            setFieldValue('fecha_vigencia_hasta', obtenerValor(datos.poliza.fecha_vigencia_hasta));
+            setFieldValue('prima_anual', obtenerValor(datos.poliza.prima_anual));
+            setFieldValue('suma_asegurada', obtenerValor(datos.poliza.suma_asegurada));
+            setFieldValue('deducible', obtenerValor(datos.poliza.deducible));
+            setFieldValue('forma_pago', obtenerValor(datos.poliza.forma_pago));
+            setFieldValue('cantidad_cuotas', obtenerValor(datos.poliza.cantidad_cuotas));
+            setFieldValue('bien_asegurado_tipo', obtenerValor(datos.poliza.bien_asegurado_tipo));
+        }
+
+        // Datos del asegurado (en la poliza)
+        if (datos.cliente) {
+            setFieldValue('asegurado_nombre', obtenerValor(datos.cliente.nombre));
+            setFieldValue('asegurado_documento', obtenerValor(datos.cliente.documento));
+            setFieldValue('asegurado_direccion', obtenerValor(datos.cliente.direccion));
+            setFieldValue('asegurado_telefono', obtenerValor(datos.cliente.telefono));
+            setFieldValue('asegurado_email', obtenerValor(datos.cliente.email));
+        }
+
+        // Compania
+        if (datos.compania?.id_sugerida) {
+            setFieldValue('compania_id', datos.compania.id_sugerida);
+        }
+
+        // Datos del vehiculo
+        if (datos.vehiculo) {
+            setFieldValue('vehiculo_marca', obtenerValor(datos.vehiculo.marca));
+            setFieldValue('vehiculo_modelo', obtenerValor(datos.vehiculo.modelo));
+            setFieldValue('vehiculo_anio', obtenerValor(datos.vehiculo.anio));
+            setFieldValue('vehiculo_patente', obtenerValor(datos.vehiculo.patente));
+            setFieldValue('vehiculo_chasis', obtenerValor(datos.vehiculo.chasis));
+            setFieldValue('vehiculo_motor', obtenerValor(datos.vehiculo.motor));
+            setFieldValue('vehiculo_color', obtenerValor(datos.vehiculo.color));
+            setFieldValue('vehiculo_uso', obtenerValor(datos.vehiculo.uso));
+        }
+
+        // Datos del inmueble
+        if (datos.inmueble) {
+            setFieldValue('inmueble_direccion', obtenerValor(datos.inmueble.direccion));
+            setFieldValue('inmueble_tipo', obtenerValor(datos.inmueble.tipo));
+            setFieldValue('inmueble_superficie', obtenerValor(datos.inmueble.superficie));
+        }
+
+        // Productor
+        if (datos.productor) {
+            setFieldValue('productor_nombre', obtenerValor(datos.productor.nombre));
+        }
+
+        // Actualizar secciones segun tipo de bien
+        actualizarSeccionesBien(obtenerValor(datos.poliza?.bien_asegurado_tipo));
+
+        // Actualizar seccion inmobiliaria
+        actualizarSeccionInmobiliaria(obtenerValor(datos.poliza?.tipo_seguro));
+
+        // Marcar si requiere revision
+        document.getElementById('requiere_revision').checked = datos.requiere_revision || false;
+    }
+
+    // Helper para setear valor de campo
+    function setFieldValue(fieldId, value) {
+        const campo = document.getElementById(fieldId);
+        if (campo) {
+            campo.value = value !== null && value !== undefined ? value : '';
+            if (value) {
+                campo.classList.add('campo-extraido', 'tiene-valor');
+            }
+        }
+    }
+
+    // Mostrar confianza V2
+    function mostrarConfianzaV2(confianza) {
+        indicadorConfianza.style.display = 'flex';
+        indicadorConfianza.querySelector('.confianza-valor').textContent = confianza.porcentaje + '%';
+
+        indicadorConfianza.classList.remove('nivel-alto', 'nivel-medio', 'nivel-bajo');
+        indicadorConfianza.classList.add('nivel-' + confianza.nivel);
+    }
+
+    // Manejar cliente sugerido (auto-seleccion por documento)
+    function manejarClienteSugerido(datos) {
+        const alertaSugerido = document.getElementById('alerta-cliente-sugerido');
+        const modoSelector = document.getElementById('cliente-modo-selector');
+        const selectCliente = document.getElementById('cliente_id');
+
+        // Verificar si hay cliente auto-seleccionado
+        if (datos.cliente_autoseleccionado) {
+            const cliente = datos.cliente_autoseleccionado;
+
+            // Mostrar alerta
+            alertaSugerido.style.display = 'flex';
+            document.getElementById('cliente-sugerido-nombre').textContent = cliente.nombre;
+
+            // Auto-seleccionar en el dropdown
+            selectCliente.value = cliente.id;
+
+            // Ocultar selector de modo (ya sabemos que es existente)
+            modoSelector.style.display = 'none';
+
+            // Asegurar modo existente
+            document.querySelector('input[name="modo_cliente"][value="existente"]').checked = true;
+            cambiarModoCliente('existente');
+
+        } else if (datos.clientes_sugeridos && datos.clientes_sugeridos.length > 0) {
+            // Hay sugerencias pero no exactas
+            alertaSugerido.style.display = 'none';
+            modoSelector.style.display = 'block';
+
+            // Pre-seleccionar el primer sugerido si score > 0.8
+            const mejor = datos.clientes_sugeridos[0];
+            if (mejor.score > 0.8) {
+                selectCliente.value = mejor.id;
+            }
+        } else {
+            // No hay sugerencias, permitir crear nuevo
+            alertaSugerido.style.display = 'none';
+            modoSelector.style.display = 'block';
+
+            // Si hay datos de cliente extraidos, sugerir crear nuevo
+            if (datos.cliente?.nombre?.valor || datos.cliente?.documento?.valor) {
+                document.querySelector('input[name="modo_cliente"][value="nuevo"]').checked = true;
+                cambiarModoCliente('nuevo');
+            }
+        }
+    }
+
+    // Cambiar modo de cliente (existente/nuevo)
+    function cambiarModoCliente(modo) {
+        const modoExistente = document.getElementById('cliente-modo-existente');
+        const modoNuevo = document.getElementById('cliente-modo-nuevo');
+        const selectCliente = document.getElementById('cliente_id');
+        const crearClienteInput = document.getElementById('crear_cliente');
+
+        if (modo === 'nuevo') {
+            modoExistente.style.display = 'none';
+            modoNuevo.style.display = 'block';
+            selectCliente.removeAttribute('required');
+            crearClienteInput.value = '1';
+        } else {
+            modoExistente.style.display = 'block';
+            modoNuevo.style.display = 'none';
+            selectCliente.setAttribute('required', 'required');
+            crearClienteInput.value = '0';
+        }
+    }
+
+    // Event listeners para cambio de modo cliente
+    document.querySelectorAll('input[name="modo_cliente"]').forEach(radio => {
+        radio.addEventListener('change', function() {
+            cambiarModoCliente(this.value);
+        });
+    });
+
+    // Boton cambiar cliente (en alerta sugerido)
+    document.getElementById('btn-cambiar-cliente')?.addEventListener('click', function() {
+        document.getElementById('alerta-cliente-sugerido').style.display = 'none';
+        document.getElementById('cliente-modo-selector').style.display = 'block';
+    });
+
+    // Actualizar secciones segun tipo de bien
+    function actualizarSeccionesBien(tipo) {
+        const seccionVehiculo = document.getElementById('seccion-vehiculo');
+        const seccionInmueble = document.getElementById('seccion-inmueble');
+
+        seccionVehiculo.style.display = tipo === 'vehiculo' ? 'block' : 'none';
+        seccionInmueble.style.display = tipo === 'inmueble' ? 'block' : 'none';
+    }
+
+    // Actualizar seccion inmobiliaria segun tipo de seguro
+    function actualizarSeccionInmobiliaria(tipoSeguro) {
+        const seccionInmobiliaria = document.getElementById('seccion-inmobiliaria');
+        const tiposConInmobiliaria = ['incendio', 'hogar'];
+        seccionInmobiliaria.style.display = tiposConInmobiliaria.includes(tipoSeguro) ? 'block' : 'none';
+    }
+
+    // Cambio en tipo de bien
+    document.getElementById('bien_asegurado_tipo').addEventListener('change', function() {
+        actualizarSeccionesBien(this.value);
+    });
+
+    // Cambio en tipo de seguro
+    document.getElementById('tipo_seguro').addEventListener('change', function() {
+        actualizarSeccionInmobiliaria(this.value);
+    });
+
+    // Boton limpiar
+    document.getElementById('btn-limpiar').addEventListener('click', function() {
+        formulario.reset();
+        document.querySelectorAll('.campo-extraido').forEach(c => c.classList.remove('tiene-valor'));
+        document.getElementById('seccion-vehiculo').style.display = 'none';
+        document.getElementById('seccion-inmueble').style.display = 'none';
+        document.getElementById('seccion-inmobiliaria').style.display = 'none';
+    });
+
+    // Modal nuevo cliente
+    const modal = document.getElementById('modal-cliente');
+    const btnNuevoCliente = document.getElementById('btn-nuevo-cliente');
+    const btnCancelar = document.getElementById('btn-cancelar-cliente');
+    const btnGuardar = document.getElementById('btn-guardar-cliente');
+    const modalClose = document.getElementById('modal-close');
+
+    btnNuevoCliente.addEventListener('click', () => modal.style.display = 'flex');
+    btnCancelar.addEventListener('click', () => modal.style.display = 'none');
+    modalClose.addEventListener('click', () => modal.style.display = 'none');
+
+    btnGuardar.addEventListener('click', function() {
+        const nombre = document.getElementById('nuevo_cliente_nombre').value.trim();
+        const telefono = document.getElementById('nuevo_cliente_telefono').value.trim();
+
+        if (!nombre) {
+            alert('El nombre es requerido');
+            return;
+        }
+
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        fetch('/distribucion/api/crear-cliente-rapido', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify({ nombre, telefono })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.exito) {
+                // Agregar al select y seleccionar
+                const select = document.getElementById('cliente_id');
+                const option = new Option(data.cliente.nombre, data.cliente.id, true, true);
+                select.add(option);
+
+                // Limpiar y cerrar modal
+                document.getElementById('nuevo_cliente_nombre').value = '';
+                document.getElementById('nuevo_cliente_telefono').value = '';
+                modal.style.display = 'none';
+            } else {
+                alert('Error: ' + data.error);
+            }
+        })
+        .catch(error => {
+            alert('Error al crear cliente: ' + error);
+        });
+    });
+
+    // Expandir vista previa
+    document.getElementById('btn-expandir').addEventListener('click', function() {
+        if (pdfPreview.src) {
+            window.open(pdfPreview.src, '_blank');
+        }
+    });
+
+    // ============================================================
+    // INTERCEPTAR SUBMIT PARA USAR API V2 CON CORRECCIONES
+    // ============================================================
+
+    formulario.addEventListener('submit', function(e) {
+        // Si tracking esta disponible, generar correcciones
+        if (typeof TrackingExtraccion !== 'undefined' && TrackingExtraccion.estaInicializado()) {
+            const tracking = TrackingExtraccion.generarCorrecciones();
+
+            // Guardar correcciones en campos ocultos
+            document.getElementById('correcciones_json').value = JSON.stringify(tracking.correcciones);
+            document.getElementById('tiempo_edicion').value = tracking.tiempo_edicion_segundos;
+
+            console.log('Correcciones registradas:', tracking.correcciones.length);
+        }
+
+        // Si es modo crear cliente nuevo, validar campos requeridos
+        if (document.getElementById('crear_cliente').value === '1') {
+            const nombre = document.getElementById('cliente_nombre').value.trim();
+
+            if (!nombre) {
+                e.preventDefault();
+                alert('El nombre del cliente es requerido');
+                return false;
+            }
+        }
+
+        // El formulario se envia normalmente
+        // La ruta existente maneja el guardado
+    });
+
+    // Limpiar tracking al limpiar formulario
+    const btnLimpiarOriginal = document.getElementById('btn-limpiar');
+    btnLimpiarOriginal.addEventListener('click', function() {
+        if (typeof TrackingExtraccion !== 'undefined') {
+            TrackingExtraccion.reset();
+        }
+        // Resetear modo cliente
+        document.querySelector('input[name="modo_cliente"][value="existente"]').checked = true;
+        cambiarModoCliente('existente');
+        document.getElementById('alerta-cliente-sugerido').style.display = 'none';
+        document.getElementById('cliente-modo-selector').style.display = 'block';
+    });
+});
+</script>
+
+<!-- Script de Tracking de Extraccion -->
+<script src="{{ url_for('static', filename='js/tracking-extraccion.js') }}"></script>
+{% endblock %}

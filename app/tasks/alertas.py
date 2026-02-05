@@ -227,12 +227,15 @@ def ejecutar_tareas_diarias(usuario_id=None):
     Returns:
         dict: Resumen de las tareas ejecutadas.
     """
+    from app.tasks.clientes_actuales import evaluar_clientes_actuales
+
     resultados = {
         'pagos_marcados_vencidos': marcar_pagos_vencidos(),
         'polizas_actualizadas': actualizar_estados_polizas(),
         'alertas_polizas': generar_alertas_vencimiento_polizas(usuario_id),
         'alertas_pagos': generar_alertas_vencimiento_pagos(usuario_id),
         'alertas_seguimientos': generar_alertas_seguimientos_pendientes(usuario_id),
+        'clientes_evaluados': evaluar_clientes_actuales(usuario_id),
     }
 
     return resultados

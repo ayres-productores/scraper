@@ -1,0 +1,283 @@
+{% extends "base.html" %}
+
+{% block title %}Buscar Polizas - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Buscar Polizas</h1>
+    <a href="{{ url_for('distribucion.index') }}" class="btn btn-outline">&#8592; Volver</a>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <form method="GET" action="{{ url_for('distribucion.buscar_polizas') }}" class="filtros-polizas">
+            <div class="filtro-grupo">
+                <input type="text" name="busqueda" value="{{ busqueda }}"
+                       placeholder="Buscar por cliente, patente, documento..."
+                       class="input-busqueda">
+            </div>
+            <div class="filtro-grupo">
+                <select name="compania" class="select-compania">
+                    <option value="">Todas las companias</option>
+                    {% for comp in companias %}
+                    <option value="{{ comp.id }}" {% if compania_id == comp.id|string %}selected{% endif %}>
+                        {{ comp.nombre }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary">
+                &#128269; Buscar
+            </button>
+            {% if busqueda or compania_id %}
+            <a href="{{ url_for('distribucion.buscar_polizas') }}" class="btn btn-outline">
+                Limpiar
+            </a>
+            {% endif %}
+        </form>
+    </div>
+    <div class="card-body">
+        <div class="resultados-info">
+            <span>{{ total }} poliza(s) encontrada(s)</span>
+            {% if total_paginas > 1 %}
+            <span class="separador">|</span>
+            <span>Pagina {{ pagina }} de {{ total_paginas }}</span>
+            {% endif %}
+        </div>
+
+        {% if polizas %}
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Archivo</th>
+                        <th>Compania</th>
+                        <th>Remitente</th>
+                        <th>Fecha Correo</th>
+                        <th>Fecha Descarga</th>
+                        <th>Estado</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for poliza in polizas %}
+                    <tr>
+                        <td>
+                            <span class="id-documento">{{ poliza.id_documento or ('PDF-' ~ poliza.id) }}</span>
+                        </td>
+                        <td>
+                            <div class="nombre-archivo" title="{{ poliza.nombre_archivo }}">
+                                {{ poliza.nombre_archivo[:40] }}{% if poliza.nombre_archivo|length > 40 %}...{% endif %}
+                            </div>
+                            {% if poliza.asunto %}
+                            <small class="text-muted asunto-correo" title="{{ poliza.asunto }}">
+                                {{ poliza.asunto[:50] }}{% if poliza.asunto|length > 50 %}...{% endif %}
+                            </small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if poliza.compania %}
+                            <span class="badge badge-compania">{{ poliza.compania.nombre }}</span>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if poliza.remitente %}
+                            <span class="remitente" title="{{ poliza.remitente }}">
+                                {{ poliza.remitente.split('@')[0][:20] }}
+                            </span>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if poliza.fecha_correo %}
+                            {{ poliza.fecha_correo.strftime('%d/%m/%Y') }}
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {{ poliza.fecha_descarga.strftime('%d/%m/%Y %H:%M') }}
+                        </td>
+                        <td>
+                            {% if poliza.estado_confirmacion == 'definitivo' %}
+                            <span class="badge badge-success">Confirmado</span>
+                            {% else %}
+                            <span class="badge badge-warning">Pendiente</span>
+                            {% endif %}
+                        </td>
+                        <td class="acciones">
+                            <a href="{{ url_for('distribucion.asignar_poliza_inteligente') }}?archivo_id={{ poliza.id }}"
+                               class="btn btn-xs btn-primary" title="Asignar a cliente">
+                                &#128100;
+                            </a>
+                            <a href="{{ url_for('extractor.descargar_pdf', archivo_id=poliza.id) }}"
+                               class="btn btn-xs btn-outline" title="Descargar PDF" target="_blank">
+                                &#128196;
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if total_paginas > 1 %}
+        <div class="paginacion">
+            {% if pagina > 1 %}
+            <a href="{{ url_for('distribucion.buscar_polizas', busqueda=busqueda, compania=compania_id, pagina=pagina-1) }}"
+               class="btn btn-sm btn-outline">&#8592; Anterior</a>
+            {% endif %}
+
+            <span class="pagina-actual">{{ pagina }} / {{ total_paginas }}</span>
+
+            {% if pagina < total_paginas %}
+            <a href="{{ url_for('distribucion.buscar_polizas', busqueda=busqueda, compania=compania_id, pagina=pagina+1) }}"
+               class="btn btn-sm btn-outline">Siguiente &#8594;</a>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% else %}
+        <div class="empty-state">
+            <span class="empty-icon">&#128269;</span>
+            <h3>No se encontraron polizas</h3>
+            {% if busqueda or compania_id %}
+            <p>Intenta modificar los filtros de busqueda.</p>
+            {% else %}
+            <p>Aun no hay polizas descargadas.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.filtros-polizas {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.filtro-grupo {
+    flex: 1;
+    min-width: 200px;
+}
+
+.input-busqueda {
+    width: 100%;
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 0.9rem;
+}
+
+.select-compania {
+    width: 100%;
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 0.9rem;
+    background: white;
+}
+
+.resultados-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    color: var(--gray);
+    font-size: 0.9rem;
+}
+
+.separador {
+    color: var(--border);
+}
+
+.table-responsive {
+    overflow-x: auto;
+}
+
+.id-documento {
+    font-family: monospace;
+    font-size: 0.85rem;
+    color: var(--primary);
+    font-weight: 500;
+}
+
+.nombre-archivo {
+    font-weight: 500;
+    word-break: break-word;
+}
+
+.asunto-correo {
+    display: block;
+    font-size: 0.8rem;
+    margin-top: 0.25rem;
+}
+
+.badge-compania {
+    background: var(--primary-light);
+    color: var(--primary);
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+.remitente {
+    font-size: 0.85rem;
+}
+
+.acciones {
+    white-space: nowrap;
+}
+
+.acciones .btn {
+    margin-right: 0.25rem;
+}
+
+.paginacion {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.pagina-actual {
+    color: var(--gray);
+    font-weight: 500;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 3rem;
+    color: var(--gray);
+}
+
+.empty-icon {
+    font-size: 3rem;
+    display: block;
+    margin-bottom: 1rem;
+}
+
+@media (max-width: 768px) {
+    .filtros-polizas {
+        flex-direction: column;
+    }
+
+    .filtro-grupo {
+        width: 100%;
+    }
+}
+</style>
+{% endblock %}

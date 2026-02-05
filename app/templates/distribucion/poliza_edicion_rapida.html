@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block title %}Editar Poliza {{ poliza.numero_poliza or poliza.id }} - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <a href="{{ url_for('distribucion.cliente_detalle', cliente_id=poliza.cliente.id) }}" class="btn btn-sm btn-outline">&larr; Volver al cliente</a>
+        <h1>Edicion Rapida</h1>
+        <p class="text-muted">{{ poliza.cliente.nombre_completo }} | Poliza: {{ poliza.numero_poliza or 'Sin numero' }}</p>
+    </div>
+    <div class="header-actions">
+        <a href="{{ url_for('distribucion.poliza_completa', poliza_id=poliza.id) }}" class="btn btn-outline">
+            Ver formulario completo
+        </a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h3>Datos Esenciales de la Poliza</h3>
+    </div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('distribucion.poliza_edicion_rapida', poliza_id=poliza.id) }}">
+            {{ form.hidden_tag() }}
+
+            <div class="grid-2">
+                <!-- Columna izquierda -->
+                <div>
+                    <div class="form-group">
+                        {{ form.numero_poliza.label }}
+                        {{ form.numero_poliza(class="form-control", placeholder="Ej: 12345678") }}
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            {{ form.tipo_seguro.label }}
+                            {{ form.tipo_seguro(class="form-control") }}
+                        </div>
+                        <div class="form-group">
+                            {{ form.compania_id.label }}
+                            {{ form.compania_id(class="form-control") }}
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            {{ form.fecha_vigencia_desde.label }}
+                            {{ form.fecha_vigencia_desde(class="form-control") }}
+                        </div>
+                        <div class="form-group">
+                            {{ form.fecha_vigencia_hasta.label }}
+                            {{ form.fecha_vigencia_hasta(class="form-control") }}
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            {{ form.prima_anual.label }}
+                            {{ form.prima_anual(class="form-control", placeholder="0.00") }}
+                        </div>
+                        <div class="form-group">
+                            {{ form.estado.label }}
+                            {{ form.estado(class="form-control") }}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Columna derecha -->
+                <div>
+                    <div class="form-group">
+                        {{ form.asegurado_nombre.label }}
+                        {{ form.asegurado_nombre(class="form-control", placeholder="Nombre completo del asegurado") }}
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            {{ form.asegurado_documento.label }}
+                            {{ form.asegurado_documento(class="form-control", placeholder="DNI/CUIT") }}
+                        </div>
+                        <div class="form-group">
+                            {{ form.forma_pago.label }}
+                            {{ form.forma_pago(class="form-control") }}
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        {{ form.notas.label }}
+                        {{ form.notas(class="form-control", rows="4", placeholder="Notas adicionales...") }}
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-actions" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-color);">
+                <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+                <a href="{{ url_for('distribucion.cliente_detalle', cliente_id=poliza.cliente.id) }}" class="btn btn-outline">Cancelar</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if poliza.archivo %}
+<div class="card" style="margin-top: 20px;">
+    <div class="card-header">
+        <h3>Documento PDF</h3>
+    </div>
+    <div class="card-body">
+        <div style="display: flex; align-items: center; gap: 15px;">
+            <span>{{ poliza.archivo.nombre_archivo }}</span>
+            <a href="{{ url_for('distribucion.ver_pdf_poliza', poliza_id=poliza.id) }}" class="btn btn-sm btn-outline" target="_blank">
+                Descargar PDF
+            </a>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

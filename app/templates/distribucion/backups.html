@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+
+{% block title %}Backup de Polizas - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Backup de Polizas</h1>
+    <p class="text-muted">Los backups se guardan permanentemente y no se eliminan al limpiar archivos</p>
+</div>
+
+<!-- Estadisticas -->
+<div class="stats-grid-4">
+    <div class="stat-card">
+        <div class="stat-icon">&#128196;</div>
+        <div class="stat-info">
+            <span class="stat-value">{{ stats.total_polizas }}</span>
+            <span class="stat-label">Total Polizas</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">&#128194;</div>
+        <div class="stat-info">
+            <span class="stat-value">{{ stats.con_archivo }}</span>
+            <span class="stat-label">Con Archivo PDF</span>
+        </div>
+    </div>
+    <div class="stat-card stat-success">
+        <div class="stat-icon">&#128190;</div>
+        <div class="stat-info">
+            <span class="stat-value">{{ stats.backups_validos }}</span>
+            <span class="stat-label">Backups Validos</span>
+        </div>
+    </div>
+    <div class="stat-card {% if stats.sin_backup > 0 %}stat-warning{% endif %}">
+        <div class="stat-icon">&#9888;</div>
+        <div class="stat-info">
+            <span class="stat-value">{{ stats.sin_backup }}</span>
+            <span class="stat-label">Sin Backup</span>
+        </div>
+    </div>
+</div>
+
+{% if polizas_sin_backup %}
+<div class="card">
+    <div class="card-header">
+        <h2>Polizas sin Backup ({{ polizas_sin_backup|length }})</h2>
+        <form method="POST" action="{{ url_for('distribucion.crear_backups_todos') }}" style="display: inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-primary">&#128190; Crear Todos los Backups</button>
+        </form>
+    </div>
+    <div class="card-body">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Cliente</th>
+                    <th>Poliza</th>
+                    <th>Tipo</th>
+                    <th>Archivo</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for poliza in polizas_sin_backup %}
+                <tr>
+                    <td>
+                        <a href="{{ url_for('distribucion.cliente_detalle', cliente_id=poliza.cliente.id) }}">
+                            {{ poliza.cliente.nombre_completo }}
+                        </a>
+                    </td>
+                    <td>{{ poliza.numero_poliza or '-' }}</td>
+                    <td>{{ poliza.tipo_seguro or '-' }}</td>
+                    <td>
+                        {% if poliza.archivo %}
+                        <small>{{ poliza.archivo.nombre_archivo[:30] }}...</small>
+                        {% else %}
+                        -
+                        {% endif %}
+                    </td>
+                    <td>
+                        <form method="POST" action="{{ url_for('distribucion.crear_backup_poliza_manual', poliza_id=poliza.id) }}" style="display: inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-outline">Crear Backup</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <div class="card-body">
+        <div class="empty-state">
+            <span class="empty-icon">&#128190;</span>
+            <h3>Todos los backups estan al dia</h3>
+            <p>No hay polizas pendientes de backup.</p>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.stats-grid-4 {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.stat-card {
+    background: var(--light);
+    padding: 1.5rem;
+    border-radius: var(--radius);
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.stat-card.stat-success {
+    background: rgba(40, 167, 69, 0.1);
+}
+
+.stat-card.stat-warning {
+    background: rgba(255, 193, 7, 0.1);
+}
+
+.stat-icon {
+    font-size: 2rem;
+}
+
+.stat-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.stat-value {
+    font-size: 1.75rem;
+    font-weight: bold;
+    color: var(--dark);
+}
+
+.stat-label {
+    font-size: 0.85rem;
+    color: var(--gray);
+}
+
+@media (max-width: 768px) {
+    .stats-grid-4 {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+</style>
+{% endblock %}

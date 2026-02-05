@@ -58,7 +58,7 @@
                     <label>Asignar todas al cliente:</label>
                     <select name="cliente_id" class="form-control" required>
                         <option value="">Seleccionar cliente...</option>
-                        {% for cliente in current_user.clientes.filter_by(activo=True).all() %}
+                        {% for cliente in clientes %}
                         <option value="{{ cliente.id }}">{{ cliente.nombre_completo }}</option>
                         {% endfor %}
                     </select>

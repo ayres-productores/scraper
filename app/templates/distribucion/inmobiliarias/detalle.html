@@ -1,0 +1,323 @@
+{% extends "base.html" %}
+
+{% block title %}{{ inmobiliaria.nombre }} - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="header-title">
+        <a href="{{ url_for('distribucion.inmobiliarias') }}" class="btn btn-sm btn-outline">&#8592;</a>
+        <h1>{{ inmobiliaria.nombre }}</h1>
+        {% if not inmobiliaria.activa %}
+        <span class="badge badge-secondary">Inactiva</span>
+        {% endif %}
+    </div>
+    <div class="header-actions">
+        <a href="{{ url_for('distribucion.editar_inmobiliaria', inmobiliaria_id=inmobiliaria.id) }}" class="btn btn-outline">Editar</a>
+    </div>
+</div>
+
+<div class="grid-2">
+    <!-- Informacion de Contacto -->
+    <div class="card">
+        <div class="card-header">
+            <h2>Informacion de Contacto</h2>
+        </div>
+        <div class="card-body">
+            <div class="info-list">
+                {% if inmobiliaria.telefono_whatsapp %}
+                <div class="info-item">
+                    <span class="info-icon">&#128241;</span>
+                    <div>
+                        <strong>WhatsApp</strong>
+                        <span>{{ inmobiliaria.telefono_whatsapp }}</span>
+                    </div>
+                </div>
+                {% endif %}
+                {% if inmobiliaria.email %}
+                <div class="info-item">
+                    <span class="info-icon">&#128231;</span>
+                    <div>
+                        <strong>Email</strong>
+                        <span>{{ inmobiliaria.email }}</span>
+                    </div>
+                </div>
+                {% endif %}
+                {% if inmobiliaria.persona_contacto %}
+                <div class="info-item">
+                    <span class="info-icon">&#128100;</span>
+                    <div>
+                        <strong>Persona de Contacto</strong>
+                        <span>{{ inmobiliaria.persona_contacto }}</span>
+                    </div>
+                </div>
+                {% endif %}
+                <div class="info-item">
+                    <span class="info-icon">&#128197;</span>
+                    <div>
+                        <strong>Registrada desde</strong>
+                        <span>{{ inmobiliaria.fecha_registro.strftime('%d/%m/%Y') }}</span>
+                    </div>
+                </div>
+            </div>
+
+            {% if inmobiliaria.notas %}
+            <div class="notas-section">
+                <h4>Notas</h4>
+                <p>{{ inmobiliaria.notas }}</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Estadisticas -->
+    <div class="card">
+        <div class="card-header">
+            <h2>Estadisticas</h2>
+        </div>
+        <div class="card-body">
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <span class="stat-numero">{{ polizas_activas }}</span>
+                    <span class="stat-label">Polizas Activas</span>
+                </div>
+                <div class="stat-item {% if polizas_por_vencer > 0 %}stat-warning{% endif %}">
+                    <span class="stat-numero">{{ polizas_por_vencer }}</span>
+                    <span class="stat-label">Por Vencer (30d)</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-numero">{{ polizas|length }}</span>
+                    <span class="stat-label">Total Polizas</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-numero">{{ notificaciones|selectattr('estado', 'equalto', 'enviado')|list|length }}</span>
+                    <span class="stat-label">Notif. Enviadas</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Polizas Asignadas -->
+<div class="card">
+    <div class="card-header">
+        <h2>&#128196; Polizas Asignadas</h2>
+    </div>
+    <div class="card-body">
+        {% if polizas %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Cliente</th>
+                    <th>Compania</th>
+                    <th>Tipo</th>
+                    <th>No Poliza</th>
+                    <th>Vigencia</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for poliza in polizas %}
+                <tr>
+                    <td>
+                        <a href="{{ url_for('distribucion.cliente_detalle', cliente_id=poliza.cliente.id) }}">
+                            {{ poliza.cliente.nombre_completo }}
+                        </a>
+                    </td>
+                    <td>
+                        {% if poliza.compania %}
+                        <span class="badge badge-primary">{{ poliza.compania.nombre }}</span>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ poliza.tipo_seguro or '-' }}</td>
+                    <td>{{ poliza.numero_poliza or '-' }}</td>
+                    <td>
+                        {% if poliza.fecha_vigencia_desde and poliza.fecha_vigencia_hasta %}
+                        {{ poliza.fecha_vigencia_desde.strftime('%d/%m/%Y') }} - {{ poliza.fecha_vigencia_hasta.strftime('%d/%m/%Y') }}
+                        {% if poliza.esta_por_vencer(30) %}
+                        <span class="badge badge-warning">Por vencer</span>
+                        {% endif %}
+                        {% else %}
+                        -
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge badge-{{ 'success' if poliza.estado == 'activa' else 'danger' if poliza.estado == 'vencida' else 'secondary' }}">
+                            {{ poliza.estado }}
+                        </span>
+                    </td>
+                    <td class="actions-cell">
+                        <a href="{{ url_for('distribucion.poliza_completa', poliza_id=poliza.id) }}" class="btn btn-sm btn-outline">Ver</a>
+                        <form method="POST" action="{{ url_for('distribucion.asignar_inmobiliaria_poliza', poliza_id=poliza.id) }}" style="display: inline;" onsubmit="return confirm('Quitar inmobiliaria de esta poliza?')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="inmobiliaria_id" value="">
+                            <button type="submit" class="btn btn-sm btn-danger" title="Quitar">&#10006;</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state-small">
+            <p class="text-muted">No hay polizas asignadas a esta inmobiliaria.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Historial de Notificaciones -->
+<div class="card">
+    <div class="card-header">
+        <h2>&#128276; Historial de Notificaciones</h2>
+    </div>
+    <div class="card-body">
+        {% if notificaciones %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Tipo</th>
+                    <th>Poliza</th>
+                    <th>Estado</th>
+                    <th>Mensaje</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for notif in notificaciones %}
+                <tr>
+                    <td>{{ notif.fecha_creacion.strftime('%d/%m/%Y %H:%M') }}</td>
+                    <td>
+                        <span class="badge badge-outline">{{ notif.tipo }}</span>
+                    </td>
+                    <td>{{ notif.poliza.numero_poliza if notif.poliza else '-' }}</td>
+                    <td>
+                        <span class="badge badge-{{ 'success' if notif.estado == 'enviado' else 'danger' if notif.estado == 'error' else 'warning' }}">
+                            {{ notif.estado }}
+                        </span>
+                        {% if notif.mensaje_error %}
+                        <br><small class="text-danger">{{ notif.mensaje_error[:30] }}...</small>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <small>{{ (notif.mensaje or '')[:50] }}{% if notif.mensaje and notif.mensaje|length > 50 %}...{% endif %}</small>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-muted text-center">No hay notificaciones registradas.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Boton de eliminar -->
+<div class="danger-zone">
+    <form method="POST" action="{{ url_for('distribucion.eliminar_inmobiliaria', inmobiliaria_id=inmobiliaria.id) }}" onsubmit="return confirm('Estas seguro de desactivar esta inmobiliaria?')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-danger">&#128465; Desactivar Inmobiliaria</button>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.header-title {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.header-title h1 {
+    margin: 0;
+}
+
+.info-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.info-item {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.info-icon {
+    font-size: 1.5rem;
+    width: 40px;
+    text-align: center;
+}
+
+.info-item div {
+    display: flex;
+    flex-direction: column;
+}
+
+.info-item strong {
+    font-size: 0.85rem;
+    color: var(--gray);
+}
+
+.notas-section {
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--gray-light);
+}
+
+.notas-section h4 {
+    margin-bottom: 0.5rem;
+    color: var(--gray);
+    font-size: 0.9rem;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+}
+
+.stat-item {
+    background: var(--light);
+    padding: 1rem;
+    border-radius: var(--radius);
+    text-align: center;
+}
+
+.stat-item.stat-warning {
+    background: rgba(255, 193, 7, 0.1);
+}
+
+.stat-numero {
+    display: block;
+    font-size: 2rem;
+    font-weight: bold;
+    color: var(--primary);
+}
+
+.stat-warning .stat-numero {
+    color: var(--warning);
+}
+
+.stat-label {
+    font-size: 0.85rem;
+    color: var(--gray);
+}
+
+.empty-state-small {
+    text-align: center;
+    padding: 2rem;
+}
+
+.danger-zone {
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--danger);
+    text-align: right;
+}
+</style>
+{% endblock %}

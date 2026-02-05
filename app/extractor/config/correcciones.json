@@ -1,0 +1,59 @@
+{
+  "version": "1.0",
+  "total_correcciones": 4,
+  "campos": {
+    "cliente.direccion": {
+      "ejemplos": [
+        {
+          "texto_original": "Los Leones 220 of",
+          "valor_corregido": "Av. Del Rosario 225",
+          "transformacion": "otro",
+          "contexto": "auto",
+          "compania": "Compañía de Seguros La Mercantil Andina S.A.",
+          "frecuencia": 2,
+          "fecha": "2026-02-03T15:01:21.887920",
+          "fecha_ultima": "2026-02-04T18:56:26.309818"
+        }
+      ]
+    },
+    "productor.nombre": {
+      "ejemplos": [
+        {
+          "texto_original": "externo y ajeno al mismo vehículo, ya sea que esté circulando, fuere remolcado,",
+          "valor_corregido": "Isola Ana Maria",
+          "transformacion": "otro",
+          "contexto": "auto",
+          "compania": "Compañía de Seguros La Mercantil Andina S.A.",
+          "frecuencia": 1,
+          "fecha": "2026-02-03T15:01:21.890399"
+        }
+      ]
+    },
+    "vehiculo.marca": {
+      "ejemplos": [
+        {
+          "texto_original": "s",
+          "valor_corregido": "Peugeot",
+          "transformacion": "otro",
+          "contexto": "auto",
+          "compania": "Compañía de Seguros La Mercantil Andina S.A.",
+          "frecuencia": 1,
+          "fecha": "2026-02-04T18:56:26.314557"
+        }
+      ]
+    },
+    "vehiculo.modelo": {
+      "ejemplos": [
+        {
+          "texto_original": "modificados cuyo cambio afecte al normal cumplimiento de la",
+          "valor_corregido": "308",
+          "transformacion": "otro",
+          "contexto": "auto",
+          "compania": "Compañía de Seguros La Mercantil Andina S.A.",
+          "frecuencia": 1,
+          "fecha": "2026-02-04T18:56:26.315923"
+        }
+      ]
+    }
+  }
+}

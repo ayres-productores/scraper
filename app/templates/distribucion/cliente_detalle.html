@@ -13,7 +13,7 @@
     </div>
     <div class="header-actions">
         <a href="{{ url_for('distribucion.editar_cliente', cliente_id=cliente.id) }}" class="btn btn-outline">Editar</a>
-        <a href="{{ url_for('distribucion.enviar_directo', cliente_id=cliente.id) }}" class="btn btn-success" target="_blank">&#128172; WhatsApp</a>
+        <button id="btn-whatsapp-directo" class="btn btn-success" onclick="enviarWhatsAppDirecto()">&#128172; WhatsApp</button>
     </div>
 </div>
 
@@ -107,6 +107,8 @@
                     <th>Nº Póliza</th>
                     <th>Vigencia</th>
                     <th>Prima</th>
+                    <th>PDF</th>
+                    <th>Confirmación</th>
                     <th>Acciones</th>
                 </tr>
             </thead>
@@ -129,9 +131,34 @@
                         -
                         {% endif %}
                     </td>
-                    <td>{% if poliza.prima_anual %}{{ "%.2f"|format(poliza.prima_anual) }} &euro;{% else %}-{% endif %}</td>
+                    <td>{% if poliza.prima_anual %}$ {{ "%.2f"|format(poliza.prima_anual) }}{% else %}-{% endif %}</td>
+                    <td>
+                        {% if poliza.ruta_pdf_backup or poliza.archivo %}
+                        <a href="{{ url_for('distribucion.ver_pdf_poliza', poliza_id=poliza.id) }}" class="btn btn-sm btn-outline" title="Ver PDF" target="_blank">
+                            &#128196;
+                            {% if poliza.ruta_pdf_backup %}<span class="badge badge-success badge-xs">B</span>{% endif %}
+                        </a>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if poliza.estado_confirmacion == 'definitivo' %}
+                        <span class="badge badge-success" title="Confirmado el {{ poliza.fecha_confirmacion.strftime('%d/%m/%Y %H:%M') if poliza.fecha_confirmacion else '' }}">
+                            &#10004; Definitivo
+                        </span>
+                        {% else %}
+                        <form method="POST" action="{{ url_for('distribucion.confirmar_poliza', poliza_id=poliza.id) }}" style="display: inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-warning" title="Marcar como definitivo" onclick="return confirm('¿Marcar esta póliza como definitiva?')">
+                                &#9888; Pendiente
+                            </button>
+                        </form>
+                        {% endif %}
+                    </td>
                     <td class="actions-cell">
-                        <a href="{{ url_for('distribucion.enviar_poliza', poliza_id=poliza.id) }}" class="btn btn-sm btn-success" title="Enviar">&#128172;</a>
+                        <a href="{{ url_for('distribucion.poliza_edicion_rapida', poliza_id=poliza.id) }}" class="btn btn-sm btn-outline" title="Editar">&#9998;</a>
+                        <button class="btn btn-sm btn-success btn-whatsapp-poliza" onclick="enviarWhatsAppPoliza({{ poliza.id }}, '{{ poliza.tipo_seguro or 'Póliza' }}')" title="Enviar WhatsApp">&#128172;</button>
                         <form method="POST" action="{{ url_for('distribucion.eliminar_poliza', poliza_id=poliza.id) }}" style="display: inline;" onsubmit="return confirm('¿Eliminar esta asignación?')">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn btn-sm btn-danger" title="Eliminar">&#128465;</button>
@@ -169,6 +196,7 @@
                     <th>Fecha</th>
                     <th>Póliza</th>
                     <th>Estado</th>
+                    <th>Confirmación</th>
                     <th>Intentos</th>
                     <th>Mensaje</th>
                 </tr>
@@ -196,6 +224,24 @@
                         </span>
                         {% if envio.mensaje_error %}
                         <br><small class="text-danger">{{ envio.mensaje_error[:30] }}...</small>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if envio.estado_mensaje == 'read' %}
+                        <span class="badge badge-success" title="Leído el {{ envio.fecha_leido.strftime('%d/%m/%Y %H:%M') if envio.fecha_leido else '' }}">
+                            &#10004; Leído
+                        </span>
+                        {% elif envio.estado_mensaje == 'delivered' %}
+                        <span class="badge badge-info">Entregado</span>
+                        {% elif envio.estado == 'enviado' %}
+                        <form method="POST" action="{{ url_for('distribucion.confirmar_envio', envio_id=envio.id) }}" style="display: inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-xs btn-outline" title="Marcar como leído">
+                                Confirmar
+                            </button>
+                        </form>
+                        {% else %}
+                        <span class="text-muted">-</span>
                         {% endif %}
                     </td>
                     <td>{{ envio.intentos }}</td>
@@ -331,13 +377,116 @@
 {% endblock %}
 
 {% block extra_js %}
+<script>
+const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+const clienteId = {{ cliente.id }};
+const clienteNombre = '{{ cliente.nombre_completo|e }}';
+
+function enviarWhatsAppDirecto() {
+    const btn = document.getElementById('btn-whatsapp-directo');
+    enviarWhatsApp(btn, { cliente_id: clienteId });
+}
+
+function enviarWhatsAppPoliza(polizaId, tipoPoliza) {
+    const btn = event.target;
+    enviarWhatsApp(btn, { cliente_id: clienteId, poliza_id: polizaId }, tipoPoliza);
+}
+
+function enviarWhatsApp(btn, data, tipoPoliza) {
+    const originalText = btn.innerHTML;
+
+    btn.disabled = true;
+    btn.innerHTML = '&#8987;';
+
+    fetch('{{ url_for("distribucion.whatsapp_enviar_mensaje") }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(result => {
+        btn.disabled = false;
+
+        if (result.success) {
+            btn.innerHTML = '&#9989;';
+            btn.classList.add('btn-sent');
+            const msg = tipoPoliza
+                ? `${tipoPoliza} enviada a ${clienteNombre}`
+                : `Mensaje enviado a ${clienteNombre}`;
+            showToast(msg, 'success');
+
+            setTimeout(() => {
+                btn.innerHTML = originalText;
+                btn.classList.remove('btn-sent');
+            }, 3000);
+
+            // Recargar para actualizar historial
+            setTimeout(() => location.reload(), 2000);
+        } else {
+            btn.innerHTML = '&#10060;';
+            btn.classList.add('btn-error');
+
+            if (result.redirect) {
+                showToast(result.error + ' Redirigiendo...', 'error');
+                setTimeout(() => {
+                    window.location.href = result.redirect;
+                }, 2000);
+            } else {
+                showToast(result.error, 'error');
+            }
+
+            setTimeout(() => {
+                btn.innerHTML = originalText;
+                btn.classList.remove('btn-error');
+            }, 3000);
+        }
+    })
+    .catch(error => {
+        btn.disabled = false;
+        btn.innerHTML = '&#10060;';
+        showToast('Error de conexión: ' + error.message, 'error');
+
+        setTimeout(() => {
+            btn.innerHTML = originalText;
+        }, 3000);
+    });
+}
+
+function showToast(message, type) {
+    let container = document.querySelector('.toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.className = 'toast-container';
+        container.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;';
+        document.body.appendChild(container);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.style.cssText = `padding:1rem 1.5rem;border-radius:8px;color:white;margin-top:0.5rem;max-width:350px;background:${type === 'success' ? 'var(--success)' : 'var(--danger)'};`;
+    toast.textContent = message;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+    }, 5000);
+}
+
 {% set pendientes_cliente = envios|selectattr('estado', 'equalto', 'pendiente')|list|length %}
 {% if pendientes_cliente > 0 %}
-<script>
 // Auto-refresh cuando hay envíos pendientes para este cliente
 setInterval(function() {
     location.reload();
 }, 10000);
-</script>
 {% endif %}
+</script>
+
+<style>
+.btn-sent { background: var(--success) !important; }
+.btn-error { background: var(--danger) !important; }
+</style>
 {% endblock %}

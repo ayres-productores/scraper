@@ -83,7 +83,7 @@
                         {% for archivo in grupo.archivos %}
                         <tr>
                             <td>
-                                <a href="#" class="pdf-link" onclick="abrirPdfViewer('{{ url_for('main.ver_archivo', archivo_id=archivo.id) }}', '{{ archivo.nombre_archivo|e }}'); return false;">
+                                <a href="#" class="pdf-link" onclick="abrirPdfViewer('{{ url_for('main.ver_archivo', archivo_id=archivo.id) }}', '{{ archivo.nombre_archivo|e }}', {{ archivo.id }}); return false;">
                                     <span class="file-icon">&#128196;</span>
                                     {{ archivo.nombre_archivo[:35] }}{% if archivo.nombre_archivo|length > 35 %}...{% endif %}
                                 </a>
@@ -139,7 +139,7 @@
                         {% for archivo in archivos_sin_compania %}
                         <tr>
                             <td>
-                                <a href="#" class="pdf-link" onclick="abrirPdfViewer('{{ url_for('main.ver_archivo', archivo_id=archivo.id) }}', '{{ archivo.nombre_archivo|e }}'); return false;">
+                                <a href="#" class="pdf-link" onclick="abrirPdfViewer('{{ url_for('main.ver_archivo', archivo_id=archivo.id) }}', '{{ archivo.nombre_archivo|e }}', {{ archivo.id }}); return false;">
                                     <span class="file-icon">&#128196;</span>
                                     {{ archivo.nombre_archivo[:35] }}{% if archivo.nombre_archivo|length > 35 %}...{% endif %}
                                 </a>
@@ -190,7 +190,7 @@
                     {% for archivo in archivos %}
                     <tr>
                         <td>
-                            <a href="#" class="pdf-link" onclick="abrirPdfViewer('{{ url_for('main.ver_archivo', archivo_id=archivo.id) }}', '{{ archivo.nombre_archivo|e }}'); return false;">
+                            <a href="#" class="pdf-link" onclick="abrirPdfViewer('{{ url_for('main.ver_archivo', archivo_id=archivo.id) }}', '{{ archivo.nombre_archivo|e }}', {{ archivo.id }}); return false;">
                                 <span class="file-icon">&#128196;</span>
                                 {{ archivo.nombre_archivo[:40] }}{% if archivo.nombre_archivo|length > 40 %}...{% endif %}
                             </a>
@@ -224,9 +224,9 @@
     </div>
     {% endif %}
 
-<!-- Modal Visor de PDF -->
+<!-- Modal Visor de PDF con Panel de Comandos -->
 <div id="pdf-modal" class="pdf-modal" onclick="cerrarPdfViewer(event)">
-    <div class="pdf-modal-content" onclick="event.stopPropagation()">
+    <div class="pdf-modal-content pdf-modal-expanded" onclick="event.stopPropagation()">
         <div class="pdf-modal-header">
             <span class="pdf-modal-title" id="pdf-modal-title">Documento</span>
             <div class="pdf-modal-actions">
@@ -234,8 +234,78 @@
                 <button type="button" class="btn btn-sm btn-close" onclick="cerrarPdfViewer()" title="Cerrar">&times;</button>
             </div>
         </div>
-        <div class="pdf-modal-body">
-            <iframe id="pdf-iframe" src="" frameborder="0"></iframe>
+        <div class="pdf-modal-body-split">
+            <!-- Panel izquierdo: Visor PDF -->
+            <div class="pdf-panel">
+                <iframe id="pdf-iframe" src="" frameborder="0"></iframe>
+            </div>
+            <!-- Panel derecho: Datos y Comandos -->
+            <div class="datos-panel">
+                <!-- Estado de carga -->
+                <div id="loading-datos" class="loading-state">
+                    <div class="spinner"></div>
+                    <p>Extrayendo datos del PDF...</p>
+                </div>
+                <!-- Error -->
+                <div id="error-datos" class="error-state" style="display: none;">
+                    <span class="error-icon">&#9888;</span>
+                    <p id="error-mensaje">Error al extraer datos</p>
+                </div>
+                <!-- Datos extraidos -->
+                <div id="datos-extraidos" style="display: none;">
+                    <!-- Resumen de datos -->
+                    <div class="datos-seccion">
+                        <h4>Datos Extraidos</h4>
+                        <div class="datos-grid" id="resumen-datos">
+                            <!-- Se llena con JavaScript -->
+                        </div>
+                        <div class="confianza-badge" id="confianza-container">
+                            Confianza: <span id="confianza-valor">--</span>
+                        </div>
+                    </div>
+                    <!-- Formulario crear cliente -->
+                    <div class="datos-seccion">
+                        <h4>Crear Cliente y Poliza</h4>
+                        <form id="form-crear-cliente">
+                            <input type="hidden" id="archivo-id-input" name="archivo_id" value="">
+                            <div class="form-group">
+                                <label for="cliente-nombre">Nombre *</label>
+                                <input type="text" id="cliente-nombre" name="nombre" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="cliente-apellido">Apellido</label>
+                                <input type="text" id="cliente-apellido" name="apellido" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label for="cliente-telefono">Telefono WhatsApp *</label>
+                                <input type="text" id="cliente-telefono" name="telefono" class="form-control" required placeholder="Ej: 1123456789">
+                            </div>
+                            <div class="form-group">
+                                <label for="cliente-email">Email</label>
+                                <input type="email" id="cliente-email" name="email" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label for="cliente-documento">Documento</label>
+                                <input type="text" id="cliente-documento" name="documento" class="form-control">
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-block" id="btn-guardar">
+                                Guardar Cliente + Poliza
+                            </button>
+                        </form>
+                        <!-- Mensaje de exito -->
+                        <div id="exito-mensaje" class="exito-state" style="display: none;">
+                            <span class="exito-icon">&#10004;</span>
+                            <p>Cliente y poliza creados exitosamente</p>
+                            <a href="#" id="ver-cliente-link" class="btn btn-outline btn-sm">Ver Cliente</a>
+                        </div>
+                    </div>
+                    <!-- JSON completo (colapsable) -->
+                    <details class="json-details">
+                        <summary>Ver JSON completo</summary>
+                        <pre id="json-completo"></pre>
+                    </details>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -515,6 +585,232 @@
     border: none;
 }
 
+/* Modal expandido con 2 columnas */
+.pdf-modal-expanded {
+    max-width: 1600px;
+}
+
+.pdf-modal-body-split {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+    border-radius: 0 0 var(--radius) var(--radius);
+}
+
+.pdf-panel {
+    flex: 0 0 60%;
+    height: 100%;
+    border-right: 1px solid var(--border);
+}
+
+.pdf-panel iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+.datos-panel {
+    flex: 0 0 40%;
+    height: 100%;
+    overflow-y: auto;
+    padding: 1rem;
+    background: var(--light);
+}
+
+.datos-seccion {
+    background: white;
+    border-radius: var(--radius);
+    padding: 1rem;
+    margin-bottom: 1rem;
+    box-shadow: var(--shadow-sm);
+}
+
+.datos-seccion h4 {
+    margin: 0 0 0.75rem 0;
+    font-size: 0.95rem;
+    color: var(--dark);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.5rem;
+}
+
+.datos-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+}
+
+.dato-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.25rem 0;
+    border-bottom: 1px dotted var(--border);
+}
+
+.dato-label {
+    color: var(--gray);
+    font-weight: 500;
+}
+
+.dato-valor {
+    color: var(--dark);
+    text-align: right;
+    max-width: 60%;
+    word-break: break-word;
+}
+
+.confianza-badge {
+    margin-top: 0.75rem;
+    padding: 0.5rem;
+    border-radius: var(--radius-sm);
+    text-align: center;
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+
+.confianza-alta {
+    background: #d4edda;
+    color: #155724;
+}
+
+.confianza-media {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.confianza-baja {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.loading-state, .error-state, .exito-state {
+    text-align: center;
+    padding: 2rem;
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid var(--border);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 1rem;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.error-state {
+    background: #fff5f5;
+    border-radius: var(--radius);
+    color: var(--danger);
+}
+
+.error-icon {
+    font-size: 2rem;
+    display: block;
+    margin-bottom: 0.5rem;
+}
+
+.exito-state {
+    background: #f0fff4;
+    border-radius: var(--radius);
+    color: var(--success);
+}
+
+.exito-icon {
+    font-size: 2rem;
+    display: block;
+    margin-bottom: 0.5rem;
+    color: var(--success);
+}
+
+.datos-panel .form-group {
+    margin-bottom: 0.75rem;
+}
+
+.datos-panel .form-group label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+    color: var(--gray-dark);
+}
+
+.datos-panel .form-control {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 0.9rem;
+}
+
+.datos-panel .form-control:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+}
+
+.btn-block {
+    width: 100%;
+    margin-top: 1rem;
+}
+
+.json-details {
+    background: white;
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+.json-details summary {
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 0.85rem;
+    background: var(--light);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.json-details summary:hover {
+    background: #e9ecef;
+}
+
+.json-details[open] summary {
+    border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.json-details pre {
+    margin: 0;
+    padding: 1rem;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    font-size: 0.75rem;
+    overflow-x: auto;
+    max-height: 300px;
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 var(--radius) var(--radius);
+}
+
+@media (max-width: 1200px) {
+    .pdf-modal-body-split {
+        flex-direction: column;
+    }
+
+    .pdf-panel {
+        flex: 0 0 50%;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .datos-panel {
+        flex: 0 0 50%;
+    }
+}
+
 @media (max-width: 768px) {
     .pdf-modal {
         padding: 10px;
@@ -532,12 +828,24 @@
         max-width: 50%;
         font-size: 0.9rem;
     }
+
+    .pdf-panel {
+        flex: 0 0 40%;
+    }
+
+    .datos-panel {
+        flex: 0 0 60%;
+    }
 }
 </style>
 {% endblock %}
 
 {% block extra_js %}
 <script>
+// Variables globales
+let archivoIdActual = null;
+let datosExtraidosActuales = null;
+
 function filtrarPorCompania(companiaId) {
     const url = new URL(window.location.href);
     if (companiaId) {
@@ -567,29 +875,134 @@ function toggleCompania(companiaId) {
     }
 }
 
-// Funciones del visor de PDF
-function abrirPdfViewer(url, nombreArchivo) {
+// Funciones del visor de PDF con panel de datos
+async function abrirPdfViewer(url, nombreArchivo, archivoId) {
     const modal = document.getElementById('pdf-modal');
     const iframe = document.getElementById('pdf-iframe');
     const titulo = document.getElementById('pdf-modal-title');
     const downloadBtn = document.getElementById('pdf-download-btn');
 
+    // Guardar ID del archivo actual
+    archivoIdActual = archivoId;
+    document.getElementById('archivo-id-input').value = archivoId;
+
     // Configurar el modal
     titulo.textContent = nombreArchivo;
     iframe.src = url;
-
-    // Configurar boton de descarga (cambiar /ver/ por /descargar/)
     downloadBtn.href = url.replace('/ver/', '/descargar/');
 
     // Mostrar modal
     modal.classList.add('active');
-
-    // Prevenir scroll del body
     document.body.style.overflow = 'hidden';
+
+    // Resetear estados del panel de datos
+    resetearPanelDatos();
+
+    // Cargar datos extraidos
+    await cargarDatosExtraidos(archivoId);
+}
+
+function resetearPanelDatos() {
+    document.getElementById('loading-datos').style.display = 'block';
+    document.getElementById('error-datos').style.display = 'none';
+    document.getElementById('datos-extraidos').style.display = 'none';
+    document.getElementById('exito-mensaje').style.display = 'none';
+    document.getElementById('form-crear-cliente').style.display = 'block';
+    document.getElementById('form-crear-cliente').reset();
+}
+
+async function cargarDatosExtraidos(archivoId) {
+    try {
+        const response = await fetch(`/distribucion/api/extraer-pdf/${archivoId}`);
+        const data = await response.json();
+
+        document.getElementById('loading-datos').style.display = 'none';
+
+        if (data.exito) {
+            datosExtraidosActuales = data.datos;
+            mostrarResumenDatos(data.datos);
+            preRellenarFormulario(data.datos);
+            document.getElementById('json-completo').textContent = JSON.stringify(data.datos, null, 2);
+            document.getElementById('datos-extraidos').style.display = 'block';
+        } else {
+            document.getElementById('error-mensaje').textContent = data.error || 'Error al extraer datos';
+            document.getElementById('error-datos').style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Error cargando datos:', error);
+        document.getElementById('loading-datos').style.display = 'none';
+        document.getElementById('error-mensaje').textContent = 'Error de conexion';
+        document.getElementById('error-datos').style.display = 'block';
+    }
+}
+
+function mostrarResumenDatos(datos) {
+    const container = document.getElementById('resumen-datos');
+    const campos = [
+        { label: 'Compania', key: 'compania_nombre_formal', alt: 'compania_detectada' },
+        { label: 'Poliza', key: 'numero_poliza' },
+        { label: 'Tipo Seguro', key: 'tipo_seguro' },
+        { label: 'Vigencia Desde', key: 'fecha_vigencia_desde' },
+        { label: 'Vigencia Hasta', key: 'fecha_vigencia_hasta' },
+        { label: 'Asegurado', key: 'asegurado_nombre' },
+        { label: 'Documento', key: 'asegurado_documento' },
+        { label: 'Vehiculo', key: 'vehiculo_marca', combinar: ['vehiculo_marca', 'vehiculo_modelo'] },
+        { label: 'Patente', key: 'vehiculo_patente' },
+        { label: 'Prima Anual', key: 'prima_anual', prefijo: '$' },
+        { label: 'Suma Asegurada', key: 'suma_asegurada', prefijo: '$' },
+    ];
+
+    let html = '';
+    for (const campo of campos) {
+        let valor = '';
+        if (campo.combinar) {
+            valor = campo.combinar.map(k => datos[k] || '').filter(v => v).join(' ');
+        } else {
+            valor = datos[campo.key] || (campo.alt ? datos[campo.alt] : '');
+        }
+        if (valor) {
+            if (campo.prefijo) valor = campo.prefijo + ' ' + valor;
+            html += `<div class="dato-item"><span class="dato-label">${campo.label}</span><span class="dato-valor">${valor}</span></div>`;
+        }
+    }
+    container.innerHTML = html || '<p class="text-muted">No se extrajeron datos</p>';
+
+    // Mostrar confianza
+    const confianza = datos.confianza || 0;
+    const porcentaje = Math.round(confianza * 100);
+    const confianzaContainer = document.getElementById('confianza-container');
+    document.getElementById('confianza-valor').textContent = porcentaje + '%';
+
+    confianzaContainer.className = 'confianza-badge';
+    if (porcentaje >= 70) {
+        confianzaContainer.classList.add('confianza-alta');
+    } else if (porcentaje >= 40) {
+        confianzaContainer.classList.add('confianza-media');
+    } else {
+        confianzaContainer.classList.add('confianza-baja');
+    }
+}
+
+function preRellenarFormulario(datos) {
+    // Separar nombre y apellido si es posible
+    const nombreCompleto = datos.asegurado_nombre || '';
+    const partes = nombreCompleto.trim().split(/\s+/);
+
+    if (partes.length >= 2) {
+        // Asumir que el ultimo es apellido
+        document.getElementById('cliente-apellido').value = partes.pop();
+        document.getElementById('cliente-nombre').value = partes.join(' ');
+    } else {
+        document.getElementById('cliente-nombre').value = nombreCompleto;
+    }
+
+    // Otros campos
+    document.getElementById('cliente-email').value = datos.asegurado_email || '';
+    document.getElementById('cliente-documento').value = datos.asegurado_documento || '';
+    document.getElementById('cliente-telefono').value = datos.asegurado_telefono || '';
 }
 
 function cerrarPdfViewer(event) {
-    // Si se hace click en el fondo (no en el contenido)
     if (event && event.target !== document.getElementById('pdf-modal')) {
         return;
     }
@@ -597,15 +1010,53 @@ function cerrarPdfViewer(event) {
     const modal = document.getElementById('pdf-modal');
     const iframe = document.getElementById('pdf-iframe');
 
-    // Ocultar modal
     modal.classList.remove('active');
-
-    // Limpiar iframe
     iframe.src = '';
-
-    // Restaurar scroll del body
     document.body.style.overflow = '';
+
+    // Limpiar datos
+    archivoIdActual = null;
+    datosExtraidosActuales = null;
 }
+
+// Manejar envio del formulario
+document.getElementById('form-crear-cliente').addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    const btn = document.getElementById('btn-guardar');
+    btn.disabled = true;
+    btn.textContent = 'Guardando...';
+
+    const formData = new FormData(this);
+
+    try {
+        const response = await fetch(`/archivos/crear-desde-pdf/${archivoIdActual}`, {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-CSRFToken': '{{ csrf_token() }}'
+            }
+        });
+
+        const data = await response.json();
+
+        if (data.exito) {
+            // Mostrar mensaje de exito
+            document.getElementById('form-crear-cliente').style.display = 'none';
+            document.getElementById('ver-cliente-link').href = `/distribucion/clientes/${data.cliente_id}`;
+            document.getElementById('exito-mensaje').style.display = 'block';
+        } else {
+            alert(data.error || 'Error al guardar');
+            btn.disabled = false;
+            btn.textContent = 'Guardar Cliente + Poliza';
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error de conexion');
+        btn.disabled = false;
+        btn.textContent = 'Guardar Cliente + Poliza';
+    }
+});
 
 // Cerrar con tecla Escape
 document.addEventListener('keydown', function(e) {

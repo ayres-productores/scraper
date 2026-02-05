@@ -62,9 +62,13 @@
                     <span class="action-icon">&#128100;</span>
                     <span class="action-text">Nuevo Cliente</span>
                 </a>
-                <a href="{{ url_for('distribucion.asignar_poliza') }}" class="action-button">
+                <a href="{{ url_for('distribucion.asignar_poliza_inteligente') }}" class="action-button">
                     <span class="action-icon">&#128196;</span>
-                    <span class="action-text">Asignar Póliza</span>
+                    <span class="action-text">Asignar Poliza</span>
+                </a>
+                <a href="{{ url_for('distribucion.buscar_polizas') }}" class="action-button">
+                    <span class="action-icon">&#128269;</span>
+                    <span class="action-text">Buscar Polizas</span>
                 </a>
                 <a href="{{ url_for('distribucion.clientes') }}" class="action-button">
                     <span class="action-icon">&#128203;</span>
@@ -73,6 +77,10 @@
                 <a href="{{ url_for('distribucion.plantillas') }}" class="action-button">
                     <span class="action-icon">&#128221;</span>
                     <span class="action-text">Plantillas</span>
+                </a>
+                <a href="{{ url_for('distribucion.whatsapp_configurar') }}" class="action-button">
+                    <span class="action-icon">&#128241;</span>
+                    <span class="action-text">Config WhatsApp</span>
                 </a>
             </div>
         </div>

@@ -131,6 +131,7 @@ class PolizaCompletaForm(FlaskForm):
         ('moto', 'Motocicleta'),
         ('vida', 'Vida'),
         ('hogar', 'Hogar'),
+        ('incendio', 'Incendio'),
         ('salud', 'Salud'),
         ('accidentes', 'Accidentes Personales'),
         ('responsabilidad', 'Responsabilidad Civil'),
@@ -465,3 +466,110 @@ class ConfiguracionAlertasForm(FlaskForm):
     ])
 
     submit = SubmitField('Guardar Configuración')
+
+
+# ============================================================================
+# FORMULARIOS DE INMOBILIARIAS
+# ============================================================================
+
+class InmobiliariaForm(FlaskForm):
+    """Formulario para crear/editar inmobiliaria."""
+
+    nombre = StringField('Nombre de la Inmobiliaria', validators=[
+        DataRequired(message='El nombre es requerido'),
+        Length(max=150)
+    ])
+    telefono_whatsapp = StringField('Teléfono WhatsApp', validators=[
+        Optional(),
+        Regexp(r'^\+?[0-9\s\-]{8,20}$', message='Formato de teléfono inválido')
+    ])
+    email = StringField('Email', validators=[
+        Optional(),
+        Length(max=120)
+    ])
+    persona_contacto = StringField('Persona de Contacto', validators=[
+        Optional(),
+        Length(max=100)
+    ])
+    notas = TextAreaField('Notas', validators=[Optional()])
+
+    submit = SubmitField('Guardar Inmobiliaria')
+
+
+class AsignarInmobiliariaForm(FlaskForm):
+    """Formulario para asignar inmobiliaria a una póliza."""
+
+    inmobiliaria_id = SelectField('Inmobiliaria', coerce=int, validators=[Optional()])
+
+    submit = SubmitField('Asignar')
+
+
+# ============================================================================
+# FORMULARIO DE EDICIÓN RÁPIDA DE PÓLIZAS
+# ============================================================================
+
+class PolizaEdicionRapidaForm(FlaskForm):
+    """Formulario simplificado para edición rápida de pólizas."""
+
+    # Datos básicos esenciales
+    numero_poliza = StringField('Número de Póliza', validators=[
+        Optional(), Length(max=50)
+    ])
+    tipo_seguro = SelectField('Tipo de Seguro', choices=[
+        ('', 'Seleccionar...'),
+        ('auto', 'Automóvil'),
+        ('moto', 'Motocicleta'),
+        ('vida', 'Vida'),
+        ('hogar', 'Hogar'),
+        ('incendio', 'Incendio'),
+        ('salud', 'Salud'),
+        ('accidentes', 'Accidentes Personales'),
+        ('responsabilidad', 'Responsabilidad Civil'),
+        ('comercio', 'Comercio'),
+        ('industria', 'Industria'),
+        ('transporte', 'Transporte'),
+        ('caucion', 'Caución'),
+        ('viaje', 'Viaje'),
+        ('mascota', 'Mascota'),
+        ('agricola', 'Agrícola'),
+        ('tecnico', 'Riesgos Técnicos'),
+        ('otro', 'Otro')
+    ], validators=[Optional()])
+    compania_id = SelectField('Compañía', coerce=int, validators=[Optional()])
+
+    # Vigencia
+    fecha_vigencia_desde = DateField('Vigencia Desde', format='%Y-%m-%d', validators=[Optional()])
+    fecha_vigencia_hasta = DateField('Vigencia Hasta', format='%Y-%m-%d', validators=[Optional()])
+
+    # Prima y estado
+    prima_anual = DecimalField('Prima Anual', places=2, validators=[Optional()])
+    estado = SelectField('Estado', choices=[
+        ('activa', 'Activa'),
+        ('vencida', 'Vencida'),
+        ('cancelada', 'Cancelada'),
+        ('en_renovacion', 'En Renovación'),
+        ('suspendida', 'Suspendida')
+    ], default='activa')
+
+    # Datos del asegurado (resumidos)
+    asegurado_nombre = StringField('Nombre del Asegurado', validators=[
+        Optional(), Length(max=150)
+    ])
+    asegurado_documento = StringField('Documento', validators=[
+        Optional(), Length(max=30)
+    ])
+
+    # Forma de pago
+    forma_pago = SelectField('Forma de Pago', choices=[
+        ('', 'Seleccionar...'),
+        ('anual', 'Anual'),
+        ('semestral', 'Semestral'),
+        ('trimestral', 'Trimestral'),
+        ('mensual', 'Mensual'),
+        ('unico', 'Pago Único')
+    ], validators=[Optional()])
+
+    # Notas
+    notas = TextAreaField('Notas', validators=[Optional()])
+
+    submit = SubmitField('Guardar Cambios')

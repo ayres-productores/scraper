@@ -1,0 +1,496 @@
+{% extends "base.html" %}
+
+{% block title %}Analisis de PDFs - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Analisis de PDFs</h1>
+    <div class="header-actions">
+        {% if archivos_sin_registro > 0 %}
+        <form method="POST" action="{{ url_for('distribucion.inicializar_registros_analisis') }}" style="display: inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-warning">
+                Inicializar {{ archivos_sin_registro }} PDFs
+            </button>
+        </form>
+        {% endif %}
+        <form method="POST" action="{{ url_for('distribucion.analisis_lote') }}" style="display: inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-primary">
+                Analizar en Lote
+            </button>
+        </form>
+    </div>
+</div>
+
+<!-- Estadisticas -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-number">{{ stats.total }}</div>
+        <div class="stat-label">Total PDFs</div>
+    </div>
+    <div class="stat-card stat-warning">
+        <div class="stat-number">{{ stats.por_estado.get('pendiente', 0) }}</div>
+        <div class="stat-label">Pendientes</div>
+    </div>
+    <div class="stat-card stat-info">
+        <div class="stat-number">{{ stats.por_estado.get('analizado', 0) }}</div>
+        <div class="stat-label">Analizados</div>
+    </div>
+    <div class="stat-card stat-success">
+        <div class="stat-number">{{ stats.por_estado.get('procesado', 0) }}</div>
+        <div class="stat-label">Procesados</div>
+    </div>
+    <div class="stat-card stat-muted">
+        <div class="stat-number">{{ stats.por_estado.get('omitido', 0) }}</div>
+        <div class="stat-label">Omitidos</div>
+    </div>
+</div>
+
+<!-- Estadisticas de Vigencia -->
+{% if stats_vigencia %}
+<div class="stats-grid stats-vigencia">
+    <div class="stat-card stat-vigente">
+        <div class="stat-number">{{ stats_vigencia.vigentes }}</div>
+        <div class="stat-label">Polizas Vigentes</div>
+    </div>
+    <div class="stat-card stat-vencida">
+        <div class="stat-number">{{ stats_vigencia.vencidas }}</div>
+        <div class="stat-label">Polizas Vencidas</div>
+    </div>
+    <div class="stat-card stat-sin-fecha">
+        <div class="stat-number">{{ stats_vigencia.sin_fecha }}</div>
+        <div class="stat-label">Sin Fecha Vigencia</div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Estadisticas por Cuenta -->
+{% if stats_por_cuenta %}
+<div class="card" style="margin-bottom: 1.5rem;">
+    <div class="card-header">
+        <h3>Estado por Cuenta de Correo</h3>
+    </div>
+    <div class="card-body">
+        <table class="table table-compact">
+            <thead>
+                <tr>
+                    <th>Cuenta</th>
+                    <th>Total</th>
+                    <th>Procesados</th>
+                    <th>Pendientes</th>
+                    <th>Progreso</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for cuenta in stats_por_cuenta %}
+                {% if cuenta[0] %}
+                <tr>
+                    <td>{{ cuenta[0] }}</td>
+                    <td>{{ cuenta[1] or 0 }}</td>
+                    <td><span class="badge badge-success">{{ cuenta[2] or 0 }}</span></td>
+                    <td><span class="badge badge-warning">{{ cuenta[3] or 0 }}</span></td>
+                    <td>
+                        {% set total = cuenta[1] or 1 %}
+                        {% set procesados = cuenta[2] or 0 %}
+                        {% set porcentaje = (procesados / total * 100)|int %}
+                        <div class="progress-bar-mini">
+                            <div class="progress-fill" style="width: {{ porcentaje }}%"></div>
+                        </div>
+                        <small>{{ porcentaje }}%</small>
+                    </td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- Filtros -->
+<div class="card filtros-card">
+    <div class="card-body">
+        <form method="GET" class="filtros-form">
+            <div class="filtro-grupo">
+                <label>Cuenta:</label>
+                <select name="cuenta" class="form-control">
+                    <option value="">Todas</option>
+                    {% for cuenta in cuentas %}
+                    <option value="{{ cuenta.id }}" {% if filtro_cuenta == cuenta.id %}selected{% endif %}>
+                        {{ cuenta.correo_gmail }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="filtro-grupo">
+                <label>Estado:</label>
+                <select name="estado" class="form-control">
+                    <option value="">Todos</option>
+                    <option value="pendiente" {% if filtro_estado == 'pendiente' %}selected{% endif %}>Pendiente</option>
+                    <option value="analizado" {% if filtro_estado == 'analizado' %}selected{% endif %}>Analizado</option>
+                    <option value="procesado" {% if filtro_estado == 'procesado' %}selected{% endif %}>Procesado</option>
+                    <option value="omitido" {% if filtro_estado == 'omitido' %}selected{% endif %}>Omitido</option>
+                </select>
+            </div>
+            <div class="filtro-grupo">
+                <label>Ordenar por:</label>
+                <select name="ordenar" class="form-control">
+                    <option value="fecha_correo" {% if filtro_ordenar == 'fecha_correo' %}selected{% endif %}>Fecha correo (recientes)</option>
+                    <option value="vigencia_prox" {% if filtro_ordenar == 'vigencia_prox' %}selected{% endif %}>Vigencia proxima</option>
+                    <option value="vigencia_lejana" {% if filtro_ordenar == 'vigencia_lejana' %}selected{% endif %}>Vigencia lejana</option>
+                </select>
+            </div>
+            <div class="filtro-grupo">
+                <label>Desde:</label>
+                <input type="date" name="fecha_desde" class="form-control" value="{{ filtro_fecha_desde }}">
+            </div>
+            <div class="filtro-grupo">
+                <label>Hasta:</label>
+                <input type="date" name="fecha_hasta" class="form-control" value="{{ filtro_fecha_hasta }}">
+            </div>
+            <div class="filtro-grupo filtro-checkbox">
+                <label>
+                    <input type="checkbox" name="solo_vigentes" value="1" {% if filtro_solo_vigentes %}checked{% endif %}>
+                    Solo polizas vigentes
+                </label>
+            </div>
+            <button type="submit" class="btn btn-primary">Filtrar</button>
+        </form>
+    </div>
+</div>
+
+<!-- Lista de PDFs -->
+<div class="card">
+    <div class="card-header">
+        <h3>PDFs Registrados</h3>
+    </div>
+    <div class="card-body">
+        {% if registros %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Asegurado / Archivo</th>
+                    <th>Compania</th>
+                    <th class="th-sortable">
+                        Vigencia
+                        <div class="sort-links">
+                            <a href="?ordenar=vigencia_prox{% if filtro_cuenta %}&cuenta={{ filtro_cuenta }}{% endif %}{% if filtro_estado %}&estado={{ filtro_estado }}{% endif %}{% if filtro_solo_vigentes %}&solo_vigentes=1{% endif %}"
+                               title="Proximas a vencer" class="{% if filtro_ordenar == 'vigencia_prox' %}active{% endif %}">&#9650;</a>
+                            <a href="?ordenar=vigencia_lejana{% if filtro_cuenta %}&cuenta={{ filtro_cuenta }}{% endif %}{% if filtro_estado %}&estado={{ filtro_estado }}{% endif %}{% if filtro_solo_vigentes %}&solo_vigentes=1{% endif %}"
+                               title="Mas lejanas" class="{% if filtro_ordenar == 'vigencia_lejana' %}active{% endif %}">&#9660;</a>
+                        </div>
+                    </th>
+                    <th>Estado</th>
+                    <th>Confianza</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for reg in registros %}
+                <tr class="{% if reg.fecha_vigencia_hasta_detectada and reg.fecha_vigencia_hasta_detectada < today %}fila-vencida{% elif reg.fecha_vigencia_hasta_detectada %}fila-vigente{% endif %}">
+                    <td>
+                        <span class="id-documento">{{ reg.archivo.id_documento if reg.archivo else '-' }}</span>
+                    </td>
+                    <td>
+                        {% if reg.asegurado_detectado %}
+                        <strong>{{ reg.asegurado_detectado[:35] }}</strong><br>
+                        {% endif %}
+                        {% if reg.archivo %}
+                        <a href="{{ url_for('main.ver_archivo', archivo_id=reg.archivo.id) }}" target="_blank" class="archivo-link">
+                            {{ reg.archivo.nombre_archivo[:30] }}{% if reg.archivo.nombre_archivo|length > 30 %}...{% endif %}
+                        </a>
+                        {% else %}
+                        -
+                        {% endif %}
+                        <br><small class="cuenta-origen">{{ reg.cuenta_origen or '-' }}</small>
+                    </td>
+                    <td>{{ reg.compania_detectada or '-' }}</td>
+                    <td class="td-vigencia">
+                        {% if reg.fecha_vigencia_hasta_detectada %}
+                            {% set dias_restantes = (reg.fecha_vigencia_hasta_detectada - today).days %}
+                            <span class="vigencia-fecha {% if dias_restantes < 0 %}vigencia-vencida{% elif dias_restantes <= 30 %}vigencia-proxima{% else %}vigencia-ok{% endif %}">
+                                {{ reg.fecha_vigencia_hasta_detectada.strftime('%d/%m/%Y') }}
+                            </span>
+                            {% if dias_restantes < 0 %}
+                            <br><small class="dias-info vencida">Vencida hace {{ -dias_restantes }} dias</small>
+                            {% elif dias_restantes == 0 %}
+                            <br><small class="dias-info hoy">Vence HOY</small>
+                            {% elif dias_restantes <= 30 %}
+                            <br><small class="dias-info proxima">Vence en {{ dias_restantes }} dias</small>
+                            {% else %}
+                            <br><small class="dias-info ok">{{ dias_restantes }} dias restantes</small>
+                            {% endif %}
+                        {% else %}
+                        <span class="sin-fecha">Sin fecha</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if reg.estado == 'pendiente' %}
+                        <span class="badge badge-warning">Pendiente</span>
+                        {% elif reg.estado == 'analizado' %}
+                        <span class="badge badge-info">Analizado</span>
+                        {% elif reg.estado == 'procesado' %}
+                        <span class="badge badge-success">Procesado</span>
+                        {% elif reg.estado == 'omitido' %}
+                        <span class="badge badge-secondary">Omitido</span>
+                        {% elif reg.estado == 'error' %}
+                        <span class="badge badge-danger">Error</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if reg.confianza_extraccion %}
+                        <span class="confianza confianza-{{ 'alta' if reg.confianza_extraccion >= 0.7 else 'media' if reg.confianza_extraccion >= 0.4 else 'baja' }}">
+                            {{ (reg.confianza_extraccion * 100)|int }}%
+                        </span>
+                        {% else %}
+                        -
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if reg.estado in ['pendiente', 'analizado'] %}
+                        <a href="{{ url_for('distribucion.procesar_pdf', archivo_id=reg.archivo_id) }}"
+                           class="btn btn-sm btn-primary">
+                            Procesar
+                        </a>
+                        {% elif reg.estado == 'procesado' %}
+                        <a href="{{ url_for('distribucion.cliente_detalle', cliente_id=reg.cliente_id) }}"
+                           class="btn btn-sm btn-outline">
+                            Ver Cliente
+                        </a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <p>No hay registros de analisis.</p>
+            {% if archivos_sin_registro > 0 %}
+            <p>Hay {{ archivos_sin_registro }} PDFs sin inicializar.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.stat-card {
+    background: white;
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    text-align: center;
+    box-shadow: var(--shadow);
+}
+
+.stat-number {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.stat-warning .stat-number { color: var(--warning); }
+.stat-info .stat-number { color: var(--info); }
+.stat-success .stat-number { color: var(--success); }
+.stat-muted .stat-number { color: var(--gray); }
+
+.stat-label {
+    color: var(--gray);
+    font-size: 0.9rem;
+    margin-top: 0.25rem;
+}
+
+.filtros-card {
+    margin-bottom: 1.5rem;
+}
+
+.filtros-form {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    align-items: flex-end;
+}
+
+.filtro-grupo {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.filtro-grupo label {
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.filtro-grupo select,
+.filtro-grupo input {
+    min-width: 150px;
+}
+
+.id-documento {
+    font-family: monospace;
+    font-weight: 600;
+    color: var(--primary);
+    background: var(--light);
+    padding: 0.2rem 0.5rem;
+    border-radius: var(--radius-sm);
+}
+
+.confianza {
+    padding: 0.2rem 0.5rem;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+
+.confianza-alta {
+    background: #d4edda;
+    color: #155724;
+}
+
+.confianza-media {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.confianza-baja {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.progress-bar-mini {
+    width: 100px;
+    height: 8px;
+    background: var(--light);
+    border-radius: 4px;
+    overflow: hidden;
+    display: inline-block;
+    vertical-align: middle;
+    margin-right: 0.5rem;
+}
+
+.progress-fill {
+    height: 100%;
+    background: var(--success);
+    transition: width 0.3s;
+}
+
+.table-compact td, .table-compact th {
+    padding: 0.5rem;
+}
+
+/* Estilos para vigencia */
+.stats-vigencia {
+    margin-bottom: 1.5rem;
+}
+
+.stat-vigente .stat-number { color: #28a745; }
+.stat-vencida .stat-number { color: #dc3545; }
+.stat-sin-fecha .stat-number { color: #6c757d; }
+
+.filtro-checkbox {
+    display: flex;
+    align-items: center;
+    padding-top: 1.5rem;
+}
+
+.filtro-checkbox label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.filtro-checkbox input[type="checkbox"] {
+    width: auto;
+}
+
+.td-vigencia {
+    min-width: 130px;
+}
+
+.vigencia-fecha {
+    font-weight: 600;
+    padding: 0.2rem 0.5rem;
+    border-radius: var(--radius-sm);
+}
+
+.vigencia-ok { background: #d4edda; color: #155724; }
+.vigencia-proxima { background: #fff3cd; color: #856404; }
+.vigencia-vencida { background: #f8d7da; color: #721c24; }
+
+.sin-fecha {
+    color: var(--gray);
+    font-style: italic;
+}
+
+.dias-info {
+    font-size: 0.75rem;
+}
+.dias-info.vencida { color: #dc3545; }
+.dias-info.hoy { color: #dc3545; font-weight: bold; }
+.dias-info.proxima { color: #856404; }
+.dias-info.ok { color: #6c757d; }
+
+.fila-vencida {
+    background: #fff5f5;
+}
+
+.fila-vigente {
+    background: #f8fff8;
+}
+
+.archivo-link {
+    font-size: 0.85rem;
+    color: var(--primary);
+}
+
+.cuenta-origen {
+    color: var(--gray);
+}
+
+/* Columnas ordenables */
+.th-sortable {
+    position: relative;
+    padding-right: 2rem !important;
+}
+
+.sort-links {
+    position: absolute;
+    right: 0.5rem;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    font-size: 0.7rem;
+    line-height: 1;
+}
+
+.sort-links a {
+    color: var(--gray);
+    text-decoration: none;
+    padding: 0 0.2rem;
+}
+
+.sort-links a:hover {
+    color: var(--primary);
+}
+
+.sort-links a.active {
+    color: var(--primary);
+    font-weight: bold;
+}
+</style>
+{% endblock %}

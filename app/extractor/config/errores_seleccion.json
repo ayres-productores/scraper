@@ -1,0 +1,158 @@
+{
+  "version": "1.0",
+  "descripcion": "Log de errores de seleccion para entrenamiento del algoritmo de extraccion predictiva",
+  "total_registros": 2,
+  "registros": [
+    {
+      "id": "bfd8229c-1294-499a-8dfb-c55a1b90c776",
+      "timestamp": "2026-02-03T15:01:21.892577",
+      "usuario_id": 2,
+      "archivo_id": 50,
+      "poliza_id": 2,
+      "cliente_id": 43,
+      "compania_detectada": "Compañía de Seguros La Mercantil Andina S.A.",
+      "tipo_seguro": "auto",
+      "correcciones": [
+        {
+          "campo_sugerido": "cliente.direccion",
+          "campo_correcto": "cliente.direccion",
+          "texto_original": "Los Leones 220 of",
+          "valor_extraido": "Los Leones 220 of",
+          "valor_corregido": "General Lopez 1767",
+          "tipo_cambio": "edicion",
+          "confianza_original": 0.75
+        },
+        {
+          "campo_sugerido": "poliza.cantidad_cuotas",
+          "campo_correcto": "poliza.cantidad_cuotas",
+          "texto_original": 0,
+          "valor_extraido": 0,
+          "valor_corregido": "4",
+          "tipo_cambio": "edicion",
+          "confianza_original": 0
+        },
+        {
+          "campo_sugerido": "vehiculo.uso",
+          "campo_correcto": "vehiculo.uso",
+          "texto_original": "de los derechos sin",
+          "valor_extraido": "de los derechos sin",
+          "valor_corregido": null,
+          "tipo_cambio": "eliminacion",
+          "confianza_original": 0.7
+        },
+        {
+          "campo_sugerido": "productor.nombre",
+          "campo_correcto": "productor.nombre",
+          "texto_original": "externo y ajeno al mismo vehículo, ya sea que esté circulando, fuere remolcado,",
+          "valor_extraido": "externo y ajeno al mismo vehículo, ya sea que esté circulando, fuere remolcado,",
+          "valor_corregido": "Isola Ana Maria",
+          "tipo_cambio": "edicion",
+          "confianza_original": 0.7
+        }
+      ],
+      "contexto": {
+        "campos_totales_modificados": 4,
+        "tiempo_edicion_segundos": 61
+      }
+    },
+    {
+      "id": "a6a49ecd-2ec9-42de-bbb8-f71d06578818",
+      "timestamp": "2026-02-04T18:56:26.374992",
+      "usuario_id": 2,
+      "archivo_id": 49,
+      "poliza_id": 3,
+      "cliente_id": 44,
+      "compania_detectada": "Compañía de Seguros La Mercantil Andina S.A.",
+      "tipo_seguro": "auto",
+      "correcciones": [
+        {
+          "campo_sugerido": "cliente.direccion",
+          "campo_correcto": "cliente.direccion",
+          "texto_original": "Los Leones 220 of",
+          "valor_extraido": "Los Leones 220 of",
+          "valor_corregido": "Av. Del Rosario 225",
+          "tipo_cambio": "edicion",
+          "confianza_original": 0.75
+        },
+        {
+          "campo_sugerido": "poliza.cantidad_cuotas",
+          "campo_correcto": "poliza.cantidad_cuotas",
+          "texto_original": 0,
+          "valor_extraido": 0,
+          "valor_corregido": "1",
+          "tipo_cambio": "edicion",
+          "confianza_original": 0
+        },
+        {
+          "campo_sugerido": "vehiculo.marca",
+          "campo_correcto": "vehiculo.marca",
+          "texto_original": "s",
+          "valor_extraido": "s",
+          "valor_corregido": "Peugeot",
+          "tipo_cambio": "edicion",
+          "confianza_original": 0.9
+        },
+        {
+          "campo_sugerido": "vehiculo.modelo",
+          "campo_correcto": "vehiculo.modelo",
+          "texto_original": "modificados cuyo cambio afecte al normal cumplimiento de la",
+          "valor_extraido": "modificados cuyo cambio afecte al normal cumplimiento de la",
+          "valor_corregido": "308",
+          "tipo_cambio": "edicion",
+          "confianza_original": 0.85
+        }
+      ],
+      "contexto": {
+        "campos_totales_modificados": 4,
+        "tiempo_edicion_segundos": 101
+      }
+    }
+  ],
+  "estadisticas": {
+    "por_campo": {
+      "cliente.direccion": {
+        "total": 2,
+        "ediciones": 2,
+        "agregados": 0,
+        "eliminaciones": 0
+      },
+      "poliza.cantidad_cuotas": {
+        "total": 2,
+        "ediciones": 2,
+        "agregados": 0,
+        "eliminaciones": 0
+      },
+      "vehiculo.uso": {
+        "total": 1,
+        "ediciones": 0,
+        "agregados": 0,
+        "eliminaciones": 1
+      },
+      "productor.nombre": {
+        "total": 1,
+        "ediciones": 1,
+        "agregados": 0,
+        "eliminaciones": 0
+      },
+      "vehiculo.marca": {
+        "total": 1,
+        "ediciones": 1,
+        "agregados": 0,
+        "eliminaciones": 0
+      },
+      "vehiculo.modelo": {
+        "total": 1,
+        "ediciones": 1,
+        "agregados": 0,
+        "eliminaciones": 0
+      }
+    },
+    "por_tipo_cambio": {
+      "edicion": 7,
+      "eliminacion": 1
+    },
+    "por_compania": {
+      "Compañía de Seguros La Mercantil Andina S.A.": 8
+    }
+  }
+}

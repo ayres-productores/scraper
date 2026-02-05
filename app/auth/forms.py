@@ -80,3 +80,12 @@ class PerfilForm(FlaskForm):
         Length(min=2, max=100, message='El nombre debe tener entre 2 y 100 caracteres')
     ])
     submit = SubmitField('Guardar Cambios')
+
+
+class ResetPasswordForm(FlaskForm):
+    """Formulario para solicitar reset de contraseña."""
+
+    correo = StringField('Usuario', validators=[
+        DataRequired(message='El usuario es requerido')
+    ])
+    submit = SubmitField('Resetear Contraseña')

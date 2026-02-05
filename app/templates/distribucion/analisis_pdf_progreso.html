@@ -1,0 +1,435 @@
+{% extends "base.html" %}
+
+{% block title %}Analizando PDFs - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Analisis en Lote</h1>
+</div>
+
+<div class="progreso-container">
+    <!-- Tarjetas de estadisticas -->
+    <div class="progreso-stats">
+        <div class="stat-card stat-total">
+            <div class="stat-icon">&#128196;</div>
+            <div class="stat-info">
+                <div class="stat-number" id="stat-total">-</div>
+                <div class="stat-label">Total PDFs</div>
+            </div>
+        </div>
+        <div class="stat-card stat-success">
+            <div class="stat-icon">&#10004;</div>
+            <div class="stat-info">
+                <div class="stat-number" id="stat-procesados">0</div>
+                <div class="stat-label">Analizados</div>
+            </div>
+        </div>
+        <div class="stat-card stat-error">
+            <div class="stat-icon">&#10008;</div>
+            <div class="stat-info">
+                <div class="stat-number" id="stat-errores">0</div>
+                <div class="stat-label">Errores</div>
+            </div>
+        </div>
+        <div class="stat-card stat-pending">
+            <div class="stat-icon">&#8987;</div>
+            <div class="stat-info">
+                <div class="stat-number" id="stat-pendientes">-</div>
+                <div class="stat-label">Restantes</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Barra de progreso principal -->
+    <div class="progreso-barra-container">
+        <div class="progreso-info">
+            <span id="progreso-status">Iniciando...</span>
+            <span id="progreso-porcentaje">0%</span>
+        </div>
+        <div class="progreso-barra">
+            <div class="progreso-fill" id="progreso-fill"></div>
+        </div>
+    </div>
+
+    <!-- PDF actual -->
+    <div class="actual-container" id="actual-container" style="display: none;">
+        <div class="actual-header">Procesando ahora:</div>
+        <div class="actual-info">
+            <span class="actual-indice" id="actual-indice"></span>
+            <span class="actual-nombre" id="actual-nombre"></span>
+        </div>
+        <div class="spinner"></div>
+    </div>
+
+    <!-- Log de actividad -->
+    <div class="log-container">
+        <div class="log-header">
+            <span>Actividad</span>
+            <button class="btn btn-sm btn-outline" onclick="toggleLog()">Mostrar/Ocultar</button>
+        </div>
+        <div class="log-content" id="log-content">
+            <div class="log-entry log-info">Esperando inicio del proceso...</div>
+        </div>
+    </div>
+
+    <!-- Botones de accion -->
+    <div class="acciones-container" id="acciones-container" style="display: none;">
+        <a href="{{ url_for('distribucion.analisis_pdf') }}" class="btn btn-primary">
+            Volver al Dashboard
+        </a>
+    </div>
+</div>
+
+<script>
+const taskId = "{{ task_id }}";
+let eventSource = null;
+let logVisible = true;
+
+function conectarSSE() {
+    eventSource = new EventSource(`/distribucion/analisis-pdf/progreso/${taskId}`);
+
+    eventSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        actualizarUI(data);
+
+        if (data.finalizado || data.error) {
+            eventSource.close();
+        }
+    };
+
+    eventSource.onerror = function() {
+        console.error('Error en conexion SSE');
+        eventSource.close();
+        document.getElementById('progreso-status').textContent = 'Error de conexion';
+    };
+}
+
+function actualizarUI(data) {
+    // Actualizar estadisticas
+    if (data.total !== undefined) {
+        document.getElementById('stat-total').textContent = data.total;
+        const pendientes = data.total - data.procesados - data.errores;
+        document.getElementById('stat-pendientes').textContent = pendientes >= 0 ? pendientes : 0;
+    }
+
+    document.getElementById('stat-procesados').textContent = data.procesados || 0;
+    document.getElementById('stat-errores').textContent = data.errores || 0;
+
+    // Actualizar barra de progreso
+    const total = data.total || 1;
+    const procesados = (data.procesados || 0) + (data.errores || 0);
+    const porcentaje = Math.round((procesados / total) * 100);
+
+    document.getElementById('progreso-fill').style.width = porcentaje + '%';
+    document.getElementById('progreso-porcentaje').textContent = porcentaje + '%';
+
+    // Actualizar status
+    const statusTexts = {
+        'iniciando': 'Iniciando proceso...',
+        'procesando': 'Analizando PDFs...',
+        'completado': 'Analisis completado',
+        'error': 'Error en el proceso'
+    };
+    document.getElementById('progreso-status').textContent = statusTexts[data.status] || data.status;
+
+    // Actualizar PDF actual
+    const actualContainer = document.getElementById('actual-container');
+    if (data.actual && !data.finalizado) {
+        actualContainer.style.display = 'flex';
+        document.getElementById('actual-indice').textContent = `[${data.actual.indice}/${data.total}]`;
+        document.getElementById('actual-nombre').textContent = data.actual.nombre;
+    } else if (data.finalizado) {
+        actualContainer.style.display = 'none';
+    }
+
+    // Agregar nuevos logs
+    if (data.nuevos_logs && data.nuevos_logs.length > 0) {
+        const logContent = document.getElementById('log-content');
+        data.nuevos_logs.forEach(log => {
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${log.tipo}`;
+            entry.textContent = log.mensaje;
+            logContent.appendChild(entry);
+            logContent.scrollTop = logContent.scrollHeight;
+        });
+    }
+
+    // Mostrar botones cuando termine
+    if (data.finalizado) {
+        document.getElementById('acciones-container').style.display = 'block';
+        document.getElementById('progreso-fill').classList.add(data.status === 'completado' ? 'completado' : 'error');
+    }
+}
+
+function toggleLog() {
+    const logContent = document.getElementById('log-content');
+    logVisible = !logVisible;
+    logContent.style.display = logVisible ? 'block' : 'none';
+}
+
+// Iniciar conexion SSE al cargar
+document.addEventListener('DOMContentLoaded', conectarSSE);
+
+// Cerrar conexion al salir
+window.addEventListener('beforeunload', function() {
+    if (eventSource) {
+        eventSource.close();
+    }
+});
+</script>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.progreso-container {
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+.progreso-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.stat-card {
+    background: white;
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    box-shadow: var(--shadow);
+}
+
+.stat-icon {
+    font-size: 1.5rem;
+    width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--light);
+}
+
+.stat-total .stat-icon { background: #e3f2fd; }
+.stat-success .stat-icon { background: #e8f5e9; }
+.stat-error .stat-icon { background: #ffebee; }
+.stat-pending .stat-icon { background: #fff3e0; }
+
+.stat-number {
+    font-size: 1.75rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.stat-total .stat-number { color: var(--primary); }
+.stat-success .stat-number { color: #2e7d32; }
+.stat-error .stat-number { color: #c62828; }
+.stat-pending .stat-number { color: #ef6c00; }
+
+.stat-label {
+    font-size: 0.85rem;
+    color: var(--gray);
+}
+
+/* Barra de progreso */
+.progreso-barra-container {
+    background: white;
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    box-shadow: var(--shadow);
+    margin-bottom: 1.5rem;
+}
+
+.progreso-info {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+    font-weight: 500;
+}
+
+.progreso-barra {
+    height: 24px;
+    background: var(--light);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.progreso-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary), #4dabf7);
+    border-radius: 12px;
+    width: 0%;
+    transition: width 0.3s ease;
+    position: relative;
+}
+
+.progreso-fill::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(255,255,255,0.3) 50%,
+        transparent 100%
+    );
+    animation: shimmer 1.5s infinite;
+}
+
+.progreso-fill.completado {
+    background: linear-gradient(90deg, #2e7d32, #66bb6a);
+}
+
+.progreso-fill.completado::after {
+    animation: none;
+}
+
+.progreso-fill.error {
+    background: linear-gradient(90deg, #c62828, #ef5350);
+}
+
+@keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+/* PDF actual */
+.actual-container {
+    background: white;
+    border-radius: var(--radius);
+    padding: 1rem 1.5rem;
+    box-shadow: var(--shadow);
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.actual-header {
+    font-weight: 600;
+    color: var(--gray);
+    white-space: nowrap;
+}
+
+.actual-info {
+    flex: 1;
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.actual-indice {
+    font-family: monospace;
+    background: var(--light);
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    color: var(--primary);
+}
+
+.actual-nombre {
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.spinner {
+    width: 24px;
+    height: 24px;
+    border: 3px solid var(--light);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Log de actividad */
+.log-container {
+    background: white;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    margin-bottom: 1.5rem;
+    overflow: hidden;
+}
+
+.log-header {
+    padding: 1rem 1.5rem;
+    background: var(--light);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 600;
+}
+
+.log-content {
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 0.5rem;
+}
+
+.log-entry {
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius-sm);
+    margin-bottom: 0.25rem;
+    font-size: 0.9rem;
+    font-family: monospace;
+}
+
+.log-exito {
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+
+.log-error {
+    background: #ffebee;
+    color: #c62828;
+}
+
+.log-info {
+    background: #e3f2fd;
+    color: #1565c0;
+}
+
+/* Acciones */
+.acciones-container {
+    text-align: center;
+    padding: 1rem 0;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .progreso-stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .stat-card {
+        padding: 1rem;
+    }
+
+    .stat-icon {
+        width: 40px;
+        height: 40px;
+        font-size: 1.25rem;
+    }
+
+    .stat-number {
+        font-size: 1.5rem;
+    }
+
+    .actual-container {
+        flex-wrap: wrap;
+    }
+}
+</style>
+{% endblock %}

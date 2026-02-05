@@ -7,7 +7,8 @@ from flask_login import login_user, logout_user, login_required, current_user
 from app import db
 from app.models import Usuario, LogActividad
 from app.auth.forms import (LoginForm, CambiarContrasenaForm,
-                             CambiarContrasenaObligatorioForm, PerfilForm)
+                             CambiarContrasenaObligatorioForm, PerfilForm,
+                             ResetPasswordForm)
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -158,3 +159,34 @@ def perfil():
     return render_template('auth/perfil.html',
                           form_perfil=form_perfil,
                           form_contrasena=form_contrasena)
+
+
+@auth_bp.route('/reset-password', methods=['GET', 'POST'])
+def reset_password():
+    """Resetear contraseña a PASSWORD (autoservicio)."""
+    if current_user.is_authenticated:
+        return redirect(url_for('main.dashboard'))
+
+    form = ResetPasswordForm()
+
+    if form.validate_on_submit():
+        usuario = Usuario.query.filter_by(correo=form.correo.data.lower()).first()
+
+        if usuario:
+            usuario.establecer_contrasena('PASSWORD')
+            usuario.debe_cambiar_contrasena = True
+            usuario.intentos_fallidos = 0
+            usuario.bloqueado_hasta = None
+            db.session.commit()
+
+            LogActividad.registrar(
+                usuario.id, 'password_reset_autoservicio',
+                f'Reset de contraseña desde login por {request.remote_addr}',
+                request
+            )
+
+        # Mensaje genérico para no revelar si el usuario existe
+        flash('Si el usuario existe, su contraseña ha sido reseteada a "PASSWORD". Deberás cambiarla al iniciar sesión.', 'info')
+        return redirect(url_for('auth.login'))
+
+    return render_template('auth/reset_password.html', form=form)

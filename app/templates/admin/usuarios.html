@@ -5,7 +5,9 @@
 {% block content %}
 <div class="page-header">
     <h1>Gestión de Usuarios</h1>
+    {% if current_user.roles_que_puede_crear() %}
     <a href="{{ url_for('admin.crear_usuario') }}" class="btn btn-primary">+ Nuevo Usuario</a>
+    {% endif %}
 </div>
 
 <div class="card">
@@ -29,9 +31,13 @@
                         <small class="text-muted">{{ usuario.correo }}</small>
                     </td>
                     <td>
-                        <span class="badge badge-{{ 'primary' if usuario.rol == 'admin' else 'secondary' }}">
-                            {{ 'Administrador' if usuario.rol == 'admin' else 'Usuario' }}
-                        </span>
+                        {% if usuario.rol == 'admin' %}
+                        <span class="badge badge-primary">Administrador</span>
+                        {% elif usuario.rol in ['poweruser', 'usuario'] %}
+                        <span class="badge badge-info">PowerUser</span>
+                        {% else %}
+                        <span class="badge badge-secondary">Collaborator</span>
+                        {% endif %}
                     </td>
                     <td>
                         {% if usuario.esta_bloqueado() %}
@@ -47,6 +53,7 @@
                     </td>
                     <td>{{ usuario.fecha_creacion.strftime('%d/%m/%Y') }}</td>
                     <td class="actions-cell">
+                        {% if current_user.puede_gestionar_usuario(usuario) %}
                         <a href="{{ url_for('admin.editar_usuario', usuario_id=usuario.id) }}" class="btn btn-sm btn-outline">
                             Editar
                         </a>
@@ -57,10 +64,17 @@
                         </form>
                         {% endif %}
                         {% if usuario.id != current_user.id %}
+                        <form method="POST" action="{{ url_for('admin.reset_password_usuario', usuario_id=usuario.id) }}" style="display: inline;" onsubmit="return confirm('¿Resetear contraseña a PASSWORD?')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm btn-secondary">Reset Pass</button>
+                        </form>
                         <form method="POST" action="{{ url_for('admin.eliminar_usuario', usuario_id=usuario.id) }}" style="display: inline;" onsubmit="return confirm('¿Eliminar este usuario? Esta acción no se puede deshacer.')">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn btn-sm btn-danger">Eliminar</button>
                         </form>
+                        {% endif %}
+                        {% else %}
+                        <span class="text-muted">Sin permisos</span>
                         {% endif %}
                     </td>
                 </tr>

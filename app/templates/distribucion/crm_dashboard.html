@@ -37,6 +37,15 @@
             <div class="stat-label">Siniestros Activos</div>
         </div>
     </div>
+    <div class="stat-card {% if clientes_a_reactivar > 0 %}stat-card-warning{% endif %}">
+        <a href="{{ url_for('distribucion.clientes_reactivar') }}" class="stat-link">
+            <div class="stat-icon">&#128276;</div>
+            <div class="stat-content">
+                <div class="stat-value">{{ clientes_a_reactivar }}</div>
+                <div class="stat-label">Clientes a Reactivar</div>
+            </div>
+        </a>
+    </div>
 </div>
 
 <div class="grid-2">
@@ -216,7 +225,7 @@
                 <span class="action-icon">&#128100;</span>
                 <span class="action-text">Nuevo Cliente</span>
             </a>
-            <a href="{{ url_for('distribucion.asignar_poliza') }}" class="action-button">
+            <a href="{{ url_for('distribucion.asignar_poliza_inteligente') }}" class="action-button">
                 <span class="action-icon">&#128196;</span>
                 <span class="action-text">Nueva Poliza</span>
             </a>

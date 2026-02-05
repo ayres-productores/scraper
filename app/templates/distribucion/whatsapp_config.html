@@ -1,0 +1,596 @@
+{% extends "base.html" %}
+
+{% block title %}Configurar WhatsApp - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Configurar WhatsApp</h1>
+    <a href="{{ url_for('distribucion.index') }}" class="btn btn-outline">Volver</a>
+</div>
+
+<div class="whatsapp-config-container">
+    <!-- Estado actual -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Estado de Conexión</h3>
+        </div>
+        <div class="card-body">
+            <div id="status-container" class="status-container">
+                <div id="status-connected" class="status-connected" style="display: none;">
+                    <span class="status-icon">&#9989;</span>
+                    <div class="status-info">
+                        <strong>WhatsApp Conectado</strong>
+                        <p id="connected-phone"></p>
+                        <p id="connected-since" class="text-muted"></p>
+                    </div>
+                </div>
+
+                <div id="status-disconnected" class="status-disconnected">
+                    <span class="status-icon">&#128683;</span>
+                    <div class="status-info">
+                        <strong>WhatsApp Desconectado</strong>
+                        <p>Conecta tu WhatsApp para enviar pólizas desde tu número personal</p>
+                    </div>
+                </div>
+
+                <div id="action-buttons" class="action-buttons">
+                    <button id="btn-conectar" class="btn btn-primary btn-lg" onclick="conectarWhatsApp()">
+                        Conectar WhatsApp
+                    </button>
+                    <button id="btn-desconectar" class="btn btn-danger" onclick="desconectarWhatsApp()" style="display: none;">
+                        Desconectar WhatsApp
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- QR Code -->
+    <div id="qr-container" class="card" style="display: none;">
+        <div class="card-header">
+            <h3>Escanear Código QR</h3>
+            <div id="qr-timer" class="qr-timer">
+                <span class="timer-icon">&#9201;</span>
+                <span id="timer-text">20s</span>
+            </div>
+        </div>
+        <div class="card-body qr-body">
+            <div id="qr-loading" class="qr-loading">
+                <div class="spinner"></div>
+                <p>Generando código QR...</p>
+            </div>
+            <div id="qr-code" class="qr-code" style="display: none;">
+                <img id="qr-image" src="" alt="Código QR de WhatsApp">
+                <div id="qr-progress" class="qr-progress">
+                    <div id="qr-progress-bar" class="qr-progress-bar"></div>
+                </div>
+            </div>
+            <div class="qr-instructions">
+                <h4>Instrucciones:</h4>
+                <ol>
+                    <li>Abre WhatsApp en tu teléfono</li>
+                    <li>Toca <strong>Menú</strong> o <strong>Configuración</strong></li>
+                    <li>Selecciona <strong>Dispositivos vinculados</strong></li>
+                    <li>Toca <strong>Vincular un dispositivo</strong></li>
+                    <li>Escanea este código QR</li>
+                </ol>
+            </div>
+            <button class="btn btn-outline" onclick="cancelarConexion()">Cancelar</button>
+        </div>
+    </div>
+
+    <!-- Información -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Información</h3>
+        </div>
+        <div class="card-body">
+            <div class="info-list">
+                <div class="info-item">
+                    <span class="info-icon">&#128274;</span>
+                    <div>
+                        <strong>Privacidad</strong>
+                        <p>Tu sesión de WhatsApp es personal y segura. Solo tú puedes usarla para enviar mensajes.</p>
+                    </div>
+                </div>
+                <div class="info-item">
+                    <span class="info-icon">&#128241;</span>
+                    <div>
+                        <strong>Dispositivo</strong>
+                        <p>La sesión permanece activa mientras tu teléfono esté conectado a internet.</p>
+                    </div>
+                </div>
+                <div class="info-item">
+                    <span class="info-icon">&#128196;</span>
+                    <div>
+                        <strong>Envío de Pólizas</strong>
+                        <p>Las pólizas se enviarán automáticamente desde tu número personal de WhatsApp.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.whatsapp-config-container {
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+.whatsapp-config-container .card {
+    margin-bottom: 1.5rem;
+}
+
+.status-container {
+    text-align: center;
+    padding: 2rem;
+}
+
+.status-connected,
+.status-disconnected {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.status-icon {
+    font-size: 3rem;
+}
+
+.status-info {
+    text-align: left;
+}
+
+.status-info strong {
+    font-size: 1.2rem;
+}
+
+.status-info p {
+    margin: 0.25rem 0 0;
+    color: var(--gray);
+}
+
+.status-connected .status-icon {
+    color: var(--success);
+}
+
+.status-disconnected .status-icon {
+    color: var(--gray);
+}
+
+.action-buttons {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.qr-timer {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--light);
+    border-radius: var(--radius);
+    font-weight: 600;
+}
+
+.qr-timer.warning {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.qr-timer.danger {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.timer-icon {
+    font-size: 1.2rem;
+}
+
+.qr-body {
+    text-align: center;
+}
+
+.qr-loading {
+    padding: 2rem;
+}
+
+.spinner {
+    width: 50px;
+    height: 50px;
+    border: 4px solid var(--light);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 1rem;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.qr-code {
+    padding: 1rem;
+    background: white;
+    display: inline-block;
+    border-radius: var(--radius);
+    margin-bottom: 1rem;
+}
+
+.qr-code img {
+    max-width: 256px;
+    height: auto;
+    display: block;
+}
+
+.qr-progress {
+    height: 4px;
+    background: #e9ecef;
+    border-radius: 2px;
+    margin-top: 0.5rem;
+    overflow: hidden;
+}
+
+.qr-progress-bar {
+    height: 100%;
+    background: var(--primary);
+    transition: width 1s linear;
+    width: 100%;
+}
+
+.qr-progress-bar.warning {
+    background: #ffc107;
+}
+
+.qr-progress-bar.danger {
+    background: #dc3545;
+}
+
+.qr-instructions {
+    text-align: left;
+    background: var(--light);
+    padding: 1rem 1.5rem;
+    border-radius: var(--radius);
+    margin-bottom: 1.5rem;
+}
+
+.qr-instructions h4 {
+    margin-bottom: 0.5rem;
+}
+
+.qr-instructions ol {
+    margin: 0;
+    padding-left: 1.5rem;
+}
+
+.qr-instructions li {
+    margin: 0.5rem 0;
+}
+
+.info-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.info-item {
+    display: flex;
+    gap: 1rem;
+    padding: 1rem;
+    background: var(--light);
+    border-radius: var(--radius);
+}
+
+.info-icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+
+.info-item strong {
+    display: block;
+    margin-bottom: 0.25rem;
+}
+
+.info-item p {
+    margin: 0;
+    color: var(--gray);
+    font-size: 0.9rem;
+}
+
+.btn-lg {
+    padding: 1rem 2rem;
+    font-size: 1.1rem;
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+const QR_DURATION = 20; // WhatsApp QR dura ~20 segundos
+const QR_REFRESH_BEFORE = 3; // Refrescar 3 segundos antes de expirar
+
+let pollInterval = null;
+let qrTimerInterval = null;
+let qrTimeRemaining = QR_DURATION;
+let currentQrData = null;
+let isConnecting = false;
+
+// Verificar estado al cargar
+document.addEventListener('DOMContentLoaded', function() {
+    verificarEstadoInicial();
+});
+
+function verificarEstadoInicial() {
+    fetch('{{ url_for("distribucion.whatsapp_estado") }}')
+    .then(response => response.json())
+    .then(data => {
+        actualizarUI(data);
+    })
+    .catch(error => {
+        console.error('Error verificando estado:', error);
+    });
+}
+
+function actualizarUI(data) {
+    const statusConnected = document.getElementById('status-connected');
+    const statusDisconnected = document.getElementById('status-disconnected');
+    const btnConectar = document.getElementById('btn-conectar');
+    const btnDesconectar = document.getElementById('btn-desconectar');
+
+    if (data.status === 'ready') {
+        statusConnected.style.display = 'flex';
+        statusDisconnected.style.display = 'none';
+        btnConectar.style.display = 'none';
+        btnDesconectar.style.display = 'inline-flex';
+
+        if (data.phone) {
+            document.getElementById('connected-phone').textContent = 'Número: +' + data.phone;
+        }
+
+        // Ocultar QR si estaba visible
+        document.getElementById('qr-container').style.display = 'none';
+        detenerTodo();
+    } else {
+        statusConnected.style.display = 'none';
+        statusDisconnected.style.display = 'flex';
+        btnConectar.style.display = 'inline-flex';
+        btnDesconectar.style.display = 'none';
+    }
+}
+
+function conectarWhatsApp() {
+    if (isConnecting) return;
+    isConnecting = true;
+
+    const btn = document.getElementById('btn-conectar');
+    btn.disabled = true;
+    btn.textContent = 'Conectando...';
+
+    // Mostrar contenedor de QR
+    document.getElementById('qr-container').style.display = 'block';
+    document.getElementById('qr-loading').style.display = 'block';
+    document.getElementById('qr-code').style.display = 'none';
+    resetearTimer();
+
+    fetch('{{ url_for("distribucion.whatsapp_conectar") }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success !== false) {
+            // Iniciar polling
+            iniciarPolling();
+        } else {
+            mostrarError(data.error || 'No se pudo iniciar la conexión');
+            resetearBotonConectar();
+        }
+    })
+    .catch(error => {
+        mostrarError('Error de conexión: ' + error.message);
+        resetearBotonConectar();
+    });
+}
+
+function iniciarPolling() {
+    // Obtener QR inmediatamente
+    obtenerQR();
+
+    // Polling cada 1 segundo para estado
+    pollInterval = setInterval(() => {
+        verificarEstado();
+    }, 1000);
+}
+
+function obtenerQR() {
+    fetch('{{ url_for("distribucion.whatsapp_qr") }}')
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.qr) {
+            // Solo actualizar si el QR cambió
+            if (data.qr !== currentQrData) {
+                currentQrData = data.qr;
+                mostrarQR(data.qr);
+                iniciarTimerQR();
+            }
+        }
+    })
+    .catch(error => {
+        console.error('Error obteniendo QR:', error);
+    });
+}
+
+function mostrarQR(qrData) {
+    document.getElementById('qr-loading').style.display = 'none';
+    document.getElementById('qr-code').style.display = 'block';
+    document.getElementById('qr-image').src = qrData;
+}
+
+function iniciarTimerQR() {
+    // Detener timer anterior si existe
+    if (qrTimerInterval) {
+        clearInterval(qrTimerInterval);
+    }
+
+    qrTimeRemaining = QR_DURATION;
+    actualizarTimerUI();
+
+    qrTimerInterval = setInterval(() => {
+        qrTimeRemaining--;
+        actualizarTimerUI();
+
+        // Refrescar QR 3 segundos antes de expirar
+        if (qrTimeRemaining === QR_REFRESH_BEFORE) {
+            obtenerQR();
+        }
+
+        // Si llega a 0, resetear y pedir nuevo QR
+        if (qrTimeRemaining <= 0) {
+            qrTimeRemaining = QR_DURATION;
+            obtenerQR();
+        }
+    }, 1000);
+}
+
+function actualizarTimerUI() {
+    const timerText = document.getElementById('timer-text');
+    const timerContainer = document.getElementById('qr-timer');
+    const progressBar = document.getElementById('qr-progress-bar');
+
+    timerText.textContent = qrTimeRemaining + 's';
+
+    // Actualizar barra de progreso
+    const percentage = (qrTimeRemaining / QR_DURATION) * 100;
+    progressBar.style.width = percentage + '%';
+
+    // Cambiar colores según tiempo restante
+    timerContainer.classList.remove('warning', 'danger');
+    progressBar.classList.remove('warning', 'danger');
+
+    if (qrTimeRemaining <= 5) {
+        timerContainer.classList.add('danger');
+        progressBar.classList.add('danger');
+    } else if (qrTimeRemaining <= 10) {
+        timerContainer.classList.add('warning');
+        progressBar.classList.add('warning');
+    }
+}
+
+function resetearTimer() {
+    qrTimeRemaining = QR_DURATION;
+    currentQrData = null;
+    actualizarTimerUI();
+}
+
+function verificarEstado() {
+    fetch('{{ url_for("distribucion.whatsapp_estado") }}')
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'ready') {
+            // Conexión exitosa
+            detenerTodo();
+            actualizarUI(data);
+            mostrarExito('WhatsApp conectado exitosamente');
+        } else if (data.status === 'error' || data.status === 'disconnected') {
+            if (data.error) {
+                mostrarError(data.error);
+            }
+        }
+        // Si está en qr_pending, seguir esperando
+    })
+    .catch(error => {
+        console.error('Error verificando estado:', error);
+    });
+}
+
+function detenerTodo() {
+    isConnecting = false;
+
+    if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+    }
+    if (qrTimerInterval) {
+        clearInterval(qrTimerInterval);
+        qrTimerInterval = null;
+    }
+
+    resetearBotonConectar();
+}
+
+function cancelarConexion() {
+    detenerTodo();
+    document.getElementById('qr-container').style.display = 'none';
+    currentQrData = null;
+}
+
+function resetearBotonConectar() {
+    const btn = document.getElementById('btn-conectar');
+    btn.disabled = false;
+    btn.textContent = 'Conectar WhatsApp';
+    isConnecting = false;
+}
+
+function desconectarWhatsApp() {
+    if (!confirm('¿Estás seguro de que deseas desconectar WhatsApp?')) {
+        return;
+    }
+
+    const btn = document.getElementById('btn-desconectar');
+    btn.disabled = true;
+    btn.textContent = 'Desconectando...';
+
+    fetch('{{ url_for("distribucion.whatsapp_desconectar") }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            mostrarExito('WhatsApp desconectado');
+            verificarEstadoInicial();
+        } else {
+            mostrarError(data.error || 'Error al desconectar');
+        }
+        btn.disabled = false;
+        btn.textContent = 'Desconectar WhatsApp';
+    })
+    .catch(error => {
+        mostrarError('Error: ' + error.message);
+        btn.disabled = false;
+        btn.textContent = 'Desconectar WhatsApp';
+    });
+}
+
+function mostrarError(mensaje) {
+    alert('Error: ' + mensaje);
+}
+
+function mostrarExito(mensaje) {
+    alert(mensaje);
+}
+
+// Limpiar al salir de la página
+window.addEventListener('beforeunload', detenerTodo);
+</script>
+{% endblock %}

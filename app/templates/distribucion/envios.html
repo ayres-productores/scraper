@@ -40,6 +40,7 @@
                     <th>Teléfono</th>
                     <th>Póliza</th>
                     <th>Estado</th>
+                    <th>Confirmación</th>
                     <th>Intentos</th>
                 </tr>
             </thead>
@@ -75,6 +76,22 @@
                         </span>
                         {% if envio.mensaje_error %}
                         <br><small class="text-danger">{{ envio.mensaje_error[:50] }}</small>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if envio.estado_mensaje == 'read' %}
+                        <span class="badge badge-success" title="Leído el {{ envio.fecha_leido.strftime('%d/%m/%Y %H:%M') if envio.fecha_leido else '' }}">
+                            &#10004; Leído
+                        </span>
+                        {% elif envio.estado_mensaje == 'delivered' %}
+                        <span class="badge badge-info">Entregado</span>
+                        {% elif envio.estado == 'enviado' %}
+                        <form method="POST" action="{{ url_for('distribucion.confirmar_envio', envio_id=envio.id) }}" style="display: inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-xs btn-outline" title="Marcar como leído">Confirmar</button>
+                        </form>
+                        {% else %}
+                        <span class="text-muted">-</span>
                         {% endif %}
                     </td>
                     <td>{{ envio.intentos }}</td>

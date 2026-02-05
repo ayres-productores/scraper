@@ -9,7 +9,7 @@ from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, TextAreaField, DateField, SubmitField
 from wtforms.validators import DataRequired, Email
 from app import db
-from app.models import CuentaGmail, Escaneo, LogActividad, HistorialEscaneoCarpeta, CorreoProcesado
+from app.models import CuentaGmail, Escaneo, LogActividad, HistorialEscaneoCarpeta, CorreoProcesado, DominioRemitente
 from app.extractor.motor import (MotorExtractorWeb, crear_motor, obtener_motor,
                                   eliminar_motor, motores_activos)
 from datetime import datetime, timedelta
@@ -32,7 +32,6 @@ class CuentaGmailForm(FlaskForm):
 
 class ConfigEscaneoForm(FlaskForm):
     """Formulario de configuración de escaneo."""
-    palabras_clave = TextAreaField('Palabras clave (una por línea)')
     carpetas = StringField('Carpetas (separadas por coma)', default='INBOX')
     fecha_desde = DateField('Fecha desde', format='%Y-%m-%d')
     fecha_hasta = DateField('Fecha hasta', format='%Y-%m-%d')
@@ -54,11 +53,9 @@ def index():
         form_escaneo.fecha_desde.data = datetime.now() - timedelta(days=365)
     if not form_escaneo.fecha_hasta.data:
         form_escaneo.fecha_hasta.data = datetime.now()
-    if not form_escaneo.palabras_clave.data:
-        form_escaneo.palabras_clave.data = '\n'.join([
-            'poliza', 'póliza', 'rio', 'uruguay',
-            'mercantil', 'andina', 'berkley'
-        ])
+
+    # Obtener dominios detectados del usuario (para filtrar búsquedas)
+    dominios_detectados = DominioRemitente.obtener_dominios_usuario(current_user.id)
 
     # Obtener cuentas del usuario
     cuentas = current_user.cuentas_gmail.filter_by(activa=True).all()
@@ -82,12 +79,22 @@ def index():
         Escaneo.fecha_inicio.desc()
     ).limit(10).all()
 
+    # Contar PDFs reales en disco (directorio del usuario)
+    import os
+    carpeta_usuario = os.path.join(current_app.config.get('UPLOAD_FOLDER', 'archivos_usuarios'), str(current_user.id))
+    pdfs_en_disco = 0
+    if os.path.exists(carpeta_usuario):
+        for root, dirs, files in os.walk(carpeta_usuario):
+            pdfs_en_disco += len([f for f in files if f.lower().endswith('.pdf')])
+
     return render_template('extractor/index.html',
                           form_cuenta=form_cuenta,
                           form_escaneo=form_escaneo,
                           cuentas=cuentas,
                           escaneo_activo=escaneo_activo,
-                          historial=historial)
+                          historial=historial,
+                          dominios_detectados=dominios_detectados,
+                          pdfs_en_disco=pdfs_en_disco)
 
 
 @extractor_bp.route('/cuenta/agregar', methods=['POST'])
@@ -162,6 +169,37 @@ def eliminar_cuenta(cuenta_id):
     return redirect(url_for('extractor.index'))
 
 
+@extractor_bp.route('/dominio/eliminar/<int:dominio_id>', methods=['POST'])
+@login_required
+def eliminar_dominio(dominio_id):
+    """Elimina un dominio de la lista de orígenes detectados."""
+    dominio = DominioRemitente.query.filter_by(
+        id=dominio_id,
+        usuario_id=current_user.id
+    ).first_or_404()
+
+    nombre = dominio.nombre_mostrar or dominio.dominio
+    db.session.delete(dominio)
+    db.session.commit()
+
+    flash(f'Dominio "{nombre}" eliminado correctamente.', 'success')
+    return redirect(url_for('extractor.index'))
+
+
+@extractor_bp.route('/dominios/limpiar-contadores', methods=['POST'])
+@login_required
+def limpiar_contadores_dominios():
+    """Resetea los contadores de PDFs de todos los dominios del usuario."""
+    dominios = DominioRemitente.query.filter_by(usuario_id=current_user.id).all()
+
+    for dominio in dominios:
+        dominio.cantidad_pdfs = 0
+
+    db.session.commit()
+    flash(f'Contadores de {len(dominios)} dominio(s) reseteados.', 'success')
+    return redirect(url_for('extractor.index'))
+
+
 @extractor_bp.route('/cuenta/probar/<int:cuenta_id>', methods=['POST'])
 @login_required
 def probar_cuenta(cuenta_id):
@@ -217,8 +255,8 @@ def iniciar_escaneo():
         return redirect(url_for('extractor.index'))
 
     # Procesar configuración
-    palabras_clave_texto = request.form.get('palabras_clave', '')
-    palabras_clave = [p.strip() for p in palabras_clave_texto.split('\n') if p.strip()]
+    # Nuevo sistema: filtrar por dominios seleccionados
+    dominios_seleccionados = request.form.getlist('dominios')  # Lista de dominios marcados
 
     carpetas_texto = request.form.get('carpetas', 'INBOX')
     carpetas = [c.strip() for c in carpetas_texto.split(',') if c.strip()]
@@ -249,7 +287,7 @@ def iniciar_escaneo():
         usuario_id=current_user.id,
         cuenta_gmail_id=cuentas[0].id if len(cuentas) == 1 else None,
         estado='en_progreso',
-        palabras_clave=','.join(palabras_clave),
+        dominios_filtro=','.join(dominios_seleccionados) if dominios_seleccionados else None,
         carpetas=','.join(carpetas),
         fecha_desde=fecha_desde.date() if fecha_desde else None,
         fecha_hasta=fecha_hasta.date() if fecha_hasta else None,
@@ -266,7 +304,7 @@ def iniciar_escaneo():
     forzar_escaneo = request.form.get('forzar_escaneo') == 'on'
 
     config = {
-        'palabras_clave': palabras_clave,
+        'dominios_filtro': dominios_seleccionados,  # Nuevo sistema de filtro por dominios
         'carpetas': carpetas,
         'fecha_desde': fecha_desde,
         'fecha_hasta': fecha_hasta,
@@ -392,6 +430,7 @@ def estado_escaneo(escaneo_id):
     pausado = False
     correo_actual = 0
     total_correos_carpeta = 0
+    pdfs_duplicados = 0
 
     if motor:
         estado_detallado = motor.obtener_estado_detallado()
@@ -399,6 +438,7 @@ def estado_escaneo(escaneo_id):
         pausado = estado_detallado['pausado']
         correo_actual = estado_detallado['correo_actual']
         total_correos_carpeta = estado_detallado['total_correos_carpeta']
+        pdfs_duplicados = estado_detallado.get('pdfs_duplicados', 0)
 
     return jsonify({
         'estado': escaneo.estado,
@@ -406,6 +446,7 @@ def estado_escaneo(escaneo_id):
         'pausado': pausado,
         'correos_escaneados': escaneo.correos_escaneados or 0,
         'pdfs_descargados': escaneo.pdfs_descargados or 0,
+        'pdfs_duplicados': pdfs_duplicados,
         'correo_actual': correo_actual,
         'total_correos_carpeta': total_correos_carpeta,
         'logs': logs,
@@ -429,6 +470,53 @@ def historial():
     ).all()
 
     return render_template('extractor/historial.html', escaneos=escaneos)
+
+
+@extractor_bp.route('/historial/<int:escaneo_id>/logs')
+@login_required
+def ver_logs_escaneo(escaneo_id):
+    """Muestra los logs detallados de un escaneo específico."""
+    from app.models import LogEscaneo
+
+    if current_user.debe_cambiar_contrasena:
+        return redirect(url_for('auth.cambiar_contrasena_obligatorio'))
+
+    # Verificar que el escaneo pertenece al usuario
+    escaneo = Escaneo.query.filter_by(
+        id=escaneo_id,
+        usuario_id=current_user.id
+    ).first_or_404()
+
+    # Filtros opcionales
+    nivel_filtro = request.args.get('nivel', '')
+    categoria_filtro = request.args.get('categoria', '')
+
+    # Construir query
+    query = LogEscaneo.query.filter_by(escaneo_id=escaneo_id)
+
+    if nivel_filtro:
+        query = query.filter_by(nivel=nivel_filtro)
+    if categoria_filtro:
+        query = query.filter_by(categoria=categoria_filtro)
+
+    logs = query.order_by(LogEscaneo.timestamp.asc()).all()
+
+    # Obtener resumen estadístico
+    resumen = LogEscaneo.obtener_resumen(escaneo_id)
+
+    # Obtener categorías únicas para el filtro
+    categorias = db.session.query(LogEscaneo.categoria).filter_by(
+        escaneo_id=escaneo_id
+    ).distinct().all()
+    categorias = [c[0] for c in categorias]
+
+    return render_template('extractor/logs_escaneo.html',
+                           escaneo=escaneo,
+                           logs=logs,
+                           resumen=resumen,
+                           categorias=categorias,
+                           nivel_filtro=nivel_filtro,
+                           categoria_filtro=categoria_filtro)
 
 
 @extractor_bp.route('/memoria')

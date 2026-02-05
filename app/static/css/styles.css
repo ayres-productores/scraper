@@ -175,6 +175,68 @@ body {
     color: var(--warning);
 }
 
+/* Menu desplegable de navegacion */
+.nav-dropdown {
+    position: relative;
+}
+
+.nav-dropdown .nav-link {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.nav-dropdown .dropdown-arrow {
+    font-size: 0.7rem;
+    transition: transform 0.2s;
+}
+
+.nav-dropdown:hover .dropdown-arrow {
+    transform: rotate(180deg);
+}
+
+.nav-dropdown-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    background: white;
+    min-width: 200px;
+    border-radius: var(--radius);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-10px);
+    transition: all 0.2s ease;
+    z-index: 1000;
+    padding: 0.5rem 0;
+}
+
+.nav-dropdown:hover .nav-dropdown-menu {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
+
+.nav-dropdown-menu a {
+    display: block;
+    padding: 0.6rem 1rem;
+    color: var(--dark);
+    text-decoration: none;
+    font-size: 0.9rem;
+    transition: background 0.15s;
+}
+
+.nav-dropdown-menu a:hover {
+    background: var(--light);
+    color: var(--primary);
+}
+
+.nav-dropdown-menu hr {
+    margin: 0.5rem 0;
+    border: none;
+    border-top: 1px solid var(--border);
+}
+
 .navbar-user {
     position: relative;
 }
@@ -1105,4 +1167,126 @@ textarea.form-control {
     .quick-actions {
         grid-template-columns: 1fr;
     }
+}
+
+/* ============================================================
+   ASIGNACION INTELIGENTE - Extraccion Predictiva
+   ============================================================ */
+
+/* Campos extraidos del PDF */
+.campo-extraido.tiene-valor {
+    background-color: #f0fff4;
+    border-color: #48bb78;
+}
+
+.campo-extraido.tiene-valor:focus {
+    border-color: #38a169;
+    box-shadow: 0 0 0 3px rgba(72, 187, 120, 0.2);
+}
+
+/* Campo modificado por el usuario */
+.campo-modificado {
+    background-color: #fffff0 !important;
+    border-color: #ecc94b !important;
+}
+
+.campo-modificando {
+    border-color: #ed8936 !important;
+}
+
+/* Alerta de cliente sugerido */
+.alerta-sugerencia {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #f0fff4 0%, #c6f6d5 100%);
+    border: 1px solid #48bb78;
+    border-radius: 8px;
+    margin-bottom: 16px;
+}
+
+.alerta-sugerencia .alerta-icono {
+    color: #38a169;
+    flex-shrink: 0;
+}
+
+.alerta-sugerencia .alerta-contenido {
+    flex-grow: 1;
+}
+
+.alerta-sugerencia .alerta-contenido strong {
+    margin-right: 8px;
+}
+
+/* Selector de modo cliente */
+.cliente-modo-selector {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 16px;
+    padding: 12px;
+    background: #f7fafc;
+    border-radius: 8px;
+}
+
+.cliente-modo-selector .modo-opcion {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    padding: 8px 12px;
+    border-radius: 6px;
+    transition: background 0.2s;
+}
+
+.cliente-modo-selector .modo-opcion:hover {
+    background: #edf2f7;
+}
+
+.cliente-modo-selector .modo-opcion input[type="radio"] {
+    accent-color: #3182ce;
+}
+
+/* Contenido de modo cliente */
+.cliente-modo-contenido {
+    animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Texto de ayuda en formulario */
+.form-help {
+    font-size: 0.85rem;
+    color: #718096;
+    margin-top: 8px;
+    font-style: italic;
+}
+
+/* Indicador de confianza mejorado */
+.confianza-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.confianza-badge.nivel-alto {
+    background: #c6f6d5;
+    color: #22543d;
+}
+
+.confianza-badge.nivel-medio {
+    background: #fefcbf;
+    color: #744210;
+}
+
+.confianza-badge.nivel-bajo {
+    background: #fed7d7;
+    color: #742a2a;
 }

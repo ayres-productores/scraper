@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}{{ titulo }} - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ titulo }}</h1>
+    <a href="{{ url_for('distribucion.inmobiliarias') }}" class="btn btn-outline">&#8592; Volver</a>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form method="POST" class="form-inmobiliaria">
+            {{ form.hidden_tag() }}
+
+            <div class="form-section">
+                <h3>Datos de la Inmobiliaria</h3>
+
+                <div class="form-group">
+                    <label for="nombre">Nombre de la Inmobiliaria *</label>
+                    {{ form.nombre(class="form-control", placeholder="Ej: Inmobiliaria Centro") }}
+                    {% if form.nombre.errors %}
+                    <span class="error-text">{{ form.nombre.errors[0] }}</span>
+                    {% endif %}
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label for="telefono_whatsapp">Telefono WhatsApp</label>
+                        {{ form.telefono_whatsapp(class="form-control", placeholder="+54 9 11 1234-5678") }}
+                        {% if form.telefono_whatsapp.errors %}
+                        <span class="error-text">{{ form.telefono_whatsapp.errors[0] }}</span>
+                        {% endif %}
+                        <small class="form-text">Para notificaciones automaticas</small>
+                    </div>
+                    <div class="form-group half">
+                        <label for="email">Email</label>
+                        {{ form.email(class="form-control", placeholder="correo@inmobiliaria.com") }}
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="persona_contacto">Persona de Contacto</label>
+                    {{ form.persona_contacto(class="form-control", placeholder="Nombre del contacto principal") }}
+                </div>
+
+                <div class="form-group">
+                    <label for="notas">Notas</label>
+                    {{ form.notas(class="form-control", rows="3", placeholder="Notas internas sobre esta inmobiliaria...") }}
+                </div>
+            </div>
+
+            <div class="form-section info-box">
+                <h4>&#128161; Informacion</h4>
+                <p>Las inmobiliarias administran polizas de tipo <strong>Incendio</strong> y <strong>Hogar</strong>.</p>
+                <p>Recibiran notificaciones automaticas por WhatsApp sobre:</p>
+                <ul>
+                    <li>Vencimiento proximo de polizas</li>
+                    <li>Renovaciones</li>
+                    <li>Siniestros</li>
+                    <li>Cambios de estado</li>
+                </ul>
+            </div>
+
+            <div class="form-actions">
+                <a href="{{ url_for('distribucion.inmobiliarias') }}" class="btn btn-outline">Cancelar</a>
+                {{ form.submit(class="btn btn-primary") }}
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.form-inmobiliaria {
+    max-width: 700px;
+}
+
+.form-section {
+    margin-bottom: 2rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--gray-light);
+}
+
+.form-section:last-of-type {
+    border-bottom: none;
+}
+
+.form-section h3 {
+    margin-bottom: 1rem;
+    color: var(--dark);
+}
+
+.info-box {
+    background: var(--light);
+    padding: 1rem;
+    border-radius: var(--radius);
+    border: none;
+}
+
+.info-box h4 {
+    margin-bottom: 0.5rem;
+    color: var(--primary);
+}
+
+.info-box ul {
+    margin: 0.5rem 0 0 1.5rem;
+    padding: 0;
+}
+
+.info-box li {
+    margin-bottom: 0.25rem;
+}
+
+.form-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: flex-end;
+    padding-top: 1rem;
+}
+</style>
+{% endblock %}

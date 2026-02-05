@@ -1,0 +1,431 @@
+{% extends "base.html" %}
+
+{% block title %}Procesar PDF - {{ archivo.id_documento }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Procesar PDF: {{ archivo.id_documento }}</h1>
+    <a href="{{ url_for('distribucion.analisis_pdf') }}" class="btn btn-outline">Volver al Dashboard</a>
+</div>
+
+<div class="procesar-container">
+    <!-- Panel izquierdo: Vista previa del PDF -->
+    <div class="pdf-preview-panel">
+        <div class="card">
+            <div class="card-header">
+                <h3>Vista Previa</h3>
+                <a href="{{ url_for('main.descargar_archivo', archivo_id=archivo.id) }}" class="btn btn-sm btn-outline">
+                    Descargar
+                </a>
+            </div>
+            <div class="card-body pdf-viewer">
+                <iframe src="{{ url_for('main.ver_archivo', archivo_id=archivo.id) }}" frameborder="0"></iframe>
+            </div>
+        </div>
+
+        <!-- Info del archivo -->
+        <div class="card info-card">
+            <div class="card-body">
+                <div class="info-row">
+                    <span class="info-label">Archivo:</span>
+                    <span>{{ archivo.nombre_archivo }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Cuenta origen:</span>
+                    <span>{{ archivo.cuenta_origen or 'Desconocida' }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Fecha correo:</span>
+                    <span>{{ archivo.fecha_correo.strftime('%d/%m/%Y %H:%M') if archivo.fecha_correo else '-' }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Remitente:</span>
+                    <span>{{ archivo.remitente or '-' }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Panel derecho: Datos extraidos y formulario -->
+    <div class="datos-panel">
+        {% if error_extraccion %}
+        <div class="alert alert-danger">
+            <strong>Error en extraccion:</strong> {{ error_extraccion }}
+        </div>
+        {% endif %}
+
+        {% if resumen %}
+        <div class="card resumen-card">
+            <div class="card-header">
+                <h3>Resumen de Extraccion</h3>
+                <span class="confianza confianza-{{ 'alta' if resumen.confianza >= 0.7 else 'media' if resumen.confianza >= 0.4 else 'baja' }}">
+                    Confianza: {{ (resumen.confianza * 100)|int }}%
+                </span>
+            </div>
+            <div class="card-body">
+                <div class="resumen-grid">
+                    <div class="resumen-item">
+                        <span class="resumen-label">Compania</span>
+                        <span class="resumen-value">{{ resumen.compania or 'No detectada' }}</span>
+                    </div>
+                    <div class="resumen-item">
+                        <span class="resumen-label">Tipo Seguro</span>
+                        <span class="resumen-value">{{ resumen.tipo_seguro or 'No detectado' }}</span>
+                    </div>
+                    <div class="resumen-item">
+                        <span class="resumen-label">Campos encontrados</span>
+                        <span class="resumen-value">{{ resumen.campos_encontrados }} de {{ resumen.campos_totales }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Formulario de procesamiento -->
+        <form method="POST" action="{{ url_for('distribucion.guardar_analisis_pdf', archivo_id=archivo.id) }}" id="formProcesar">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>Datos de la Poliza</h3>
+                </div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Numero de Poliza</label>
+                            <input type="text" name="numero_poliza" class="form-control"
+                                   value="{{ datos_extraidos.get('numero_poliza', '') }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Tipo de Seguro</label>
+                            <select name="tipo_seguro" class="form-control">
+                                <option value="automovil" {% if datos_extraidos.get('tipo_seguro') == 'automovil' %}selected{% endif %}>Automovil</option>
+                                <option value="motocicleta" {% if datos_extraidos.get('tipo_seguro') == 'motocicleta' %}selected{% endif %}>Motocicleta</option>
+                                <option value="hogar" {% if datos_extraidos.get('tipo_seguro') == 'hogar' %}selected{% endif %}>Hogar</option>
+                                <option value="vida" {% if datos_extraidos.get('tipo_seguro') == 'vida' %}selected{% endif %}>Vida</option>
+                                <option value="salud" {% if datos_extraidos.get('tipo_seguro') == 'salud' %}selected{% endif %}>Salud</option>
+                                <option value="comercio" {% if datos_extraidos.get('tipo_seguro') == 'comercio' %}selected{% endif %}>Comercio</option>
+                                <option value="otro" {% if not datos_extraidos.get('tipo_seguro') %}selected{% endif %}>Otro</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Vigencia Desde</label>
+                            <input type="date" name="fecha_desde" class="form-control"
+                                   value="{{ datos_extraidos.get('fecha_desde', '') }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Vigencia Hasta</label>
+                            <input type="date" name="fecha_hasta" class="form-control"
+                                   value="{{ datos_extraidos.get('fecha_hasta', '') }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Prima Anual ($)</label>
+                            <input type="number" step="0.01" name="prima" class="form-control"
+                                   value="{{ datos_extraidos.get('prima', '') }}">
+                        </div>
+                    </div>
+
+                    <h4 style="margin-top: 1.5rem;">Datos del Asegurado</h4>
+                    <div class="form-grid">
+                        <div class="form-group full-width">
+                            <label>Nombre Completo</label>
+                            <input type="text" name="asegurado_nombre" class="form-control"
+                                   value="{{ datos_extraidos.get('asegurado_nombre', '') }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Documento (DNI/CUIT)</label>
+                            <input type="text" name="asegurado_documento" class="form-control"
+                                   value="{{ datos_extraidos.get('asegurado_documento', '') }}">
+                        </div>
+                    </div>
+
+                    {% if datos_extraidos.get('tipo_seguro') in ['automovil', 'motocicleta'] or datos_extraidos.get('vehiculo_patente') %}
+                    <h4 style="margin-top: 1.5rem;">Datos del Vehiculo</h4>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Marca</label>
+                            <input type="text" name="vehiculo_marca" class="form-control"
+                                   value="{{ datos_extraidos.get('vehiculo_marca', '') }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Modelo</label>
+                            <input type="text" name="vehiculo_modelo" class="form-control"
+                                   value="{{ datos_extraidos.get('vehiculo_modelo', '') }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Ano</label>
+                            <input type="number" name="vehiculo_anio" class="form-control"
+                                   value="{{ datos_extraidos.get('vehiculo_anio', '') }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Patente</label>
+                            <input type="text" name="vehiculo_patente" class="form-control"
+                                   value="{{ datos_extraidos.get('vehiculo_patente', '') }}">
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Seleccion/Creacion de Cliente -->
+            <div class="card">
+                <div class="card-header">
+                    <h3>Asignar a Cliente</h3>
+                </div>
+                <div class="card-body">
+                    <div class="cliente-selector">
+                        <div class="form-group">
+                            <label>Seleccionar cliente existente:</label>
+                            <select name="cliente_id" id="clienteSelect" class="form-control">
+                                <option value="">-- Seleccionar --</option>
+                                {% for cliente in clientes %}
+                                <option value="{{ cliente.id }}">
+                                    {{ cliente.nombre_completo }} - {{ cliente.documento_identidad or cliente.telefono_whatsapp }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <div class="divider">
+                            <span>O crear nuevo cliente</span>
+                        </div>
+
+                        <div class="crear-cliente-toggle">
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="crear_cliente" value="1" id="crearClienteCheck"
+                                       onchange="toggleCrearCliente()">
+                                Crear cliente nuevo
+                            </label>
+                        </div>
+
+                        <div id="nuevoClienteFields" style="display: none;">
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label>Nombre *</label>
+                                    <input type="text" name="cliente_nombre" class="form-control"
+                                           value="{{ datos_extraidos.get('asegurado_nombre', '').split()[0] if datos_extraidos.get('asegurado_nombre') else '' }}">
+                                </div>
+                                <div class="form-group">
+                                    <label>Apellido</label>
+                                    <input type="text" name="cliente_apellido" class="form-control"
+                                           value="{{ ' '.join(datos_extraidos.get('asegurado_nombre', '').split()[1:]) if datos_extraidos.get('asegurado_nombre') else '' }}">
+                                </div>
+                                <div class="form-group">
+                                    <label>Telefono WhatsApp *</label>
+                                    <input type="text" name="cliente_telefono" class="form-control"
+                                           value="{{ datos_extraidos.get('asegurado_telefono', '') }}" placeholder="+54...">
+                                </div>
+                                <div class="form-group">
+                                    <label>Email</label>
+                                    <input type="email" name="cliente_email" class="form-control"
+                                           value="{{ datos_extraidos.get('asegurado_email', '') }}">
+                                </div>
+                                <div class="form-group">
+                                    <label>Documento</label>
+                                    <input type="text" name="cliente_documento" class="form-control"
+                                           value="{{ datos_extraidos.get('asegurado_documento', '') }}">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Acciones -->
+            <div class="acciones-procesar">
+                <div class="acciones-izq">
+                    <button type="submit" name="accion" value="omitir" class="btn btn-outline"
+                            onclick="return confirm('Omitir este PDF?')">
+                        Omitir PDF
+                    </button>
+                    <input type="text" name="motivo_omision" class="form-control" placeholder="Motivo (opcional)"
+                           style="width: 200px;">
+                </div>
+                <div class="acciones-der">
+                    <label class="checkbox-label">
+                        <input type="checkbox" name="continuar" value="1" checked>
+                        Continuar con siguiente
+                    </label>
+                    <button type="submit" name="accion" value="procesar" class="btn btn-primary btn-lg">
+                        Crear Poliza
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.procesar-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+}
+
+@media (max-width: 1200px) {
+    .procesar-container {
+        grid-template-columns: 1fr;
+    }
+}
+
+.pdf-preview-panel .card-body.pdf-viewer {
+    padding: 0;
+    height: 500px;
+}
+
+.pdf-viewer iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+.info-card {
+    margin-top: 1rem;
+}
+
+.info-row {
+    display: flex;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.info-row:last-child {
+    border-bottom: none;
+}
+
+.info-label {
+    font-weight: 600;
+    min-width: 120px;
+    color: var(--gray);
+}
+
+.resumen-card .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.confianza {
+    padding: 0.3rem 0.75rem;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+}
+
+.confianza-alta { background: #d4edda; color: #155724; }
+.confianza-media { background: #fff3cd; color: #856404; }
+.confianza-baja { background: #f8d7da; color: #721c24; }
+
+.resumen-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+}
+
+.resumen-item {
+    text-align: center;
+}
+
+.resumen-label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--gray);
+}
+
+.resumen-value {
+    display: block;
+    font-weight: 600;
+    font-size: 1.1rem;
+    margin-top: 0.25rem;
+}
+
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+}
+
+.form-group.full-width {
+    grid-column: 1 / -1;
+}
+
+.divider {
+    text-align: center;
+    margin: 1.5rem 0;
+    position: relative;
+}
+
+.divider::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 100%;
+    height: 1px;
+    background: var(--border);
+}
+
+.divider span {
+    background: white;
+    padding: 0 1rem;
+    position: relative;
+    color: var(--gray);
+}
+
+.crear-cliente-toggle {
+    margin-bottom: 1rem;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+}
+
+.checkbox-label input {
+    width: auto;
+}
+
+.acciones-procesar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 1.5rem;
+    padding: 1rem;
+    background: var(--light);
+    border-radius: var(--radius);
+}
+
+.acciones-izq, .acciones-der {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.btn-lg {
+    padding: 0.75rem 2rem;
+    font-size: 1.1rem;
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleCrearCliente() {
+    const checkbox = document.getElementById('crearClienteCheck');
+    const fields = document.getElementById('nuevoClienteFields');
+    const select = document.getElementById('clienteSelect');
+
+    if (checkbox.checked) {
+        fields.style.display = 'block';
+        select.disabled = true;
+        select.value = '';
+    } else {
+        fields.style.display = 'none';
+        select.disabled = false;
+    }
+}
+</script>
+{% endblock %}

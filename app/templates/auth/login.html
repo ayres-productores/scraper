@@ -52,6 +52,12 @@
                 <button type="submit" class="btn btn-primary btn-block">
                     Iniciar Sesión
                 </button>
+
+                <div style="text-align: center; margin-top: 1rem;">
+                    <a href="{{ url_for('auth.reset_password') }}" style="color: #667085; font-size: 0.9rem;">
+                        ¿Olvidaste tu contraseña?
+                    </a>
+                </div>
             </form>
 
             <div class="login-footer">
