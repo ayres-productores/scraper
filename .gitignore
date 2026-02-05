@@ -130,3 +130,21 @@ tmpclaude-*
 
 # User files
 archivos_usuarios/
+
+# Backups de pólizas (datos de usuario)
+polizas_backup/
+
+# Scripts de debug y pruebas
+test_*.py
+debug_*
+LOGICA_DESCARGA_POLIZAS.txt
+
+# Scripts de corrección específicos
+agregar_fernando_ruf.py
+corregir_companias.py
+
+# Archivos temporales de WhatsApp
+whatsapp_qr.png
+
+# Configuración local de Claude Code
+.claude/
