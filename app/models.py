@@ -31,11 +31,22 @@ class Usuario(UserMixin, db.Model):
 
     __tablename__ = 'usuarios'
 
+    # Constantes de roles
+    ROL_ADMIN = 'admin'
+    ROL_POWERUSER = 'poweruser'
+    ROL_COLLABORATOR = 'collaborator'
+
+    ROLES = [
+        (ROL_ADMIN, 'Administrador'),
+        (ROL_POWERUSER, 'PowerUser'),
+        (ROL_COLLABORATOR, 'Collaborator')
+    ]
+
     id = db.Column(db.Integer, primary_key=True)
     correo = db.Column(db.String(120), unique=True, nullable=False, index=True)
     nombre = db.Column(db.String(100), nullable=False)
     contrasena_hash = db.Column(db.String(128), nullable=False)
-    rol = db.Column(db.String(20), default='usuario')  # 'admin' o 'usuario'
+    rol = db.Column(db.String(20), default='poweruser')  # 'admin', 'poweruser' o 'collaborator'
     activo = db.Column(db.Boolean, default=True)
     debe_cambiar_contrasena = db.Column(db.Boolean, default=True)
     intentos_fallidos = db.Column(db.Integer, default=0)
@@ -63,7 +74,48 @@ class Usuario(UserMixin, db.Model):
 
     def es_admin(self):
         """Verifica si el usuario es administrador."""
-        return self.rol == 'admin'
+        return self.rol == self.ROL_ADMIN
+
+    def es_poweruser(self):
+        """Verifica si el usuario es PowerUser (incluye rol legacy 'usuario')."""
+        return self.rol in (self.ROL_POWERUSER, 'usuario')
+
+    def es_collaborator(self):
+        """Verifica si el usuario es Collaborator."""
+        return self.rol == self.ROL_COLLABORATOR
+
+    def puede_gestionar_usuarios(self):
+        """Verifica si puede acceder al ABM de usuarios."""
+        return self.rol in (self.ROL_ADMIN, self.ROL_POWERUSER, 'usuario')
+
+    def puede_gestionar_usuario(self, otro_usuario):
+        """
+        Verifica si puede crear/editar/eliminar a otro usuario.
+        - Admin: puede gestionar a todos
+        - PowerUser: solo puede gestionar Collaborators
+        - Collaborator: no puede gestionar a nadie (solo su perfil)
+        """
+        if self.rol == self.ROL_ADMIN:
+            return True
+        if self.rol in (self.ROL_POWERUSER, 'usuario'):
+            return otro_usuario.rol == self.ROL_COLLABORATOR
+        return False
+
+    def roles_que_puede_crear(self):
+        """Retorna lista de roles que este usuario puede crear."""
+        if self.rol == self.ROL_ADMIN:
+            return [self.ROL_POWERUSER, self.ROL_COLLABORATOR]
+        if self.rol in (self.ROL_POWERUSER, 'usuario'):
+            return [self.ROL_COLLABORATOR]
+        return []
+
+    def obtener_nombre_rol(self):
+        """Retorna el nombre legible del rol."""
+        roles_dict = dict(self.ROLES)
+        # Manejar rol legacy
+        if self.rol == 'usuario':
+            return 'PowerUser'
+        return roles_dict.get(self.rol, self.rol)
 
     def esta_bloqueado(self):
         """Verifica si la cuenta está bloqueada temporalmente."""
@@ -104,7 +156,7 @@ class CuentaGmail(db.Model):
     __tablename__ = 'cuentas_gmail'
 
     id = db.Column(db.Integer, primary_key=True)
-    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id'), nullable=False)
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id'), nullable=False, index=True)
     correo_gmail = db.Column(db.String(120), nullable=False)
     contrasena_app_encriptada = db.Column(db.Text, nullable=False)
     activa = db.Column(db.Boolean, default=True)
@@ -134,14 +186,15 @@ class Escaneo(db.Model):
     __tablename__ = 'escaneos'
 
     id = db.Column(db.Integer, primary_key=True)
-    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id'), nullable=False)
-    cuenta_gmail_id = db.Column(db.Integer, db.ForeignKey('cuentas_gmail.id'), nullable=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id'), nullable=False, index=True)
+    cuenta_gmail_id = db.Column(db.Integer, db.ForeignKey('cuentas_gmail.id'), nullable=True, index=True)
     fecha_inicio = db.Column(db.DateTime, default=datetime.utcnow)
     fecha_fin = db.Column(db.DateTime, nullable=True)
-    estado = db.Column(db.String(20), default='en_progreso')  # en_progreso, completado, error, cancelado
+    estado = db.Column(db.String(20), default='en_progreso', index=True)  # en_progreso, completado, error, cancelado
     correos_escaneados = db.Column(db.Integer, default=0)
     pdfs_descargados = db.Column(db.Integer, default=0)
-    palabras_clave = db.Column(db.Text, nullable=True)
+    palabras_clave = db.Column(db.Text, nullable=True)  # DEPRECADO - usar dominios_filtro
+    dominios_filtro = db.Column(db.Text, nullable=True)  # Dominios separados por coma, vacío = todos
     carpetas = db.Column(db.Text, nullable=True)
     fecha_desde = db.Column(db.Date, nullable=True)
     fecha_hasta = db.Column(db.Date, nullable=True)
@@ -166,6 +219,204 @@ class Escaneo(db.Model):
         return f'<Escaneo {self.id} - {self.estado}>'
 
 
+class LogEscaneo(db.Model):
+    """Modelo para logs detallados y persistentes de cada escaneo."""
+
+    __tablename__ = 'logs_escaneo'
+
+    id = db.Column(db.Integer, primary_key=True)
+    escaneo_id = db.Column(db.Integer, db.ForeignKey('escaneos.id'), nullable=False, index=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    # Clasificación del log
+    nivel = db.Column(db.String(10), default='info')  # info, success, warning, error
+    categoria = db.Column(db.String(30), default='sistema')  # conexion, carpeta, correo, pdf, sistema, memoria
+
+    # Información del evento
+    mensaje = db.Column(db.String(500), nullable=False)
+    cuenta_gmail = db.Column(db.String(120), nullable=True)
+    carpeta = db.Column(db.String(100), nullable=True)
+    correo_message_id = db.Column(db.String(200), nullable=True)
+    archivo_nombre = db.Column(db.String(255), nullable=True)
+
+    # Datos adicionales (JSON para flexibilidad)
+    datos_extra = db.Column(db.Text, nullable=True)  # JSON con info adicional
+
+    # Relación
+    escaneo = db.relationship('Escaneo', backref=db.backref('logs', lazy='dynamic', cascade='all, delete-orphan'))
+
+    @staticmethod
+    def registrar(escaneo_id, mensaje, nivel='info', categoria='sistema',
+                  cuenta_gmail=None, carpeta=None, correo_message_id=None,
+                  archivo_nombre=None, datos_extra=None):
+        """Registra un log en la base de datos."""
+        import json
+        log = LogEscaneo(
+            escaneo_id=escaneo_id,
+            mensaje=mensaje[:500] if mensaje else '',
+            nivel=nivel,
+            categoria=categoria,
+            cuenta_gmail=cuenta_gmail,
+            carpeta=carpeta,
+            correo_message_id=correo_message_id,
+            archivo_nombre=archivo_nombre,
+            datos_extra=json.dumps(datos_extra) if datos_extra else None
+        )
+        db.session.add(log)
+        # No commit aquí, se hace en batch para mejor rendimiento
+        return log
+
+    @staticmethod
+    def obtener_resumen(escaneo_id):
+        """Obtiene resumen estadístico de logs de un escaneo."""
+        from sqlalchemy import func
+
+        stats = db.session.query(
+            LogEscaneo.nivel,
+            func.count(LogEscaneo.id)
+        ).filter_by(escaneo_id=escaneo_id).group_by(LogEscaneo.nivel).all()
+
+        resumen = {'total': 0, 'info': 0, 'success': 0, 'warning': 0, 'error': 0}
+        for nivel, cantidad in stats:
+            resumen[nivel] = cantidad
+            resumen['total'] += cantidad
+
+        return resumen
+
+    @staticmethod
+    def obtener_errores(escaneo_id, limite=50):
+        """Obtiene los errores de un escaneo."""
+        return LogEscaneo.query.filter_by(
+            escaneo_id=escaneo_id,
+            nivel='error'
+        ).order_by(LogEscaneo.timestamp.desc()).limit(limite).all()
+
+    def __repr__(self):
+        return f'<LogEscaneo [{self.nivel}] {self.mensaje[:30]}>'
+
+
+class DominioRemitente(db.Model):
+    """Modelo para dominios o direcciones de email de donde se han descargado PDFs."""
+
+    __tablename__ = 'dominios_remitentes'
+
+    id = db.Column(db.Integer, primary_key=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id'), nullable=False)
+    dominio = db.Column(db.String(150), nullable=False, index=True)  # Puede ser dominio o email completo
+    nombre_mostrar = db.Column(db.String(100), nullable=True)  # Nombre amigable
+    es_email_completo = db.Column(db.Boolean, default=False)  # True si es dirección específica
+    cantidad_pdfs = db.Column(db.Integer, default=0)
+    ultimo_pdf = db.Column(db.DateTime, nullable=True)
+    activo = db.Column(db.Boolean, default=True)  # Para habilitar/deshabilitar en búsquedas
+    fecha_detectado = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Relación con usuario
+    usuario = db.relationship('Usuario', backref=db.backref('dominios_remitentes', lazy='dynamic'))
+
+    # Índice único por usuario y dominio
+    __table_args__ = (
+        db.UniqueConstraint('usuario_id', 'dominio', name='unique_usuario_dominio'),
+    )
+
+    @staticmethod
+    def registrar_dominio(usuario_id, remitente):
+        """Registra o actualiza un dominio cuando se descarga un PDF."""
+        import re
+
+        if not remitente:
+            return None
+
+        # Extraer dominio del email
+        match = re.search(r'@([a-zA-Z0-9.-]+)', remitente)
+        if not match:
+            return None
+
+        dominio = match.group(1).lower()
+
+        # Ignorar dominios genéricos de correo personal
+        dominios_ignorar = {'gmail.com', 'hotmail.com', 'outlook.com', 'yahoo.com',
+                           'yahoo.com.ar', 'hotmail.com.ar', 'live.com', 'live.com.ar'}
+        if dominio in dominios_ignorar:
+            return None
+
+        # Buscar dominio existente
+        dom = DominioRemitente.query.filter_by(
+            usuario_id=usuario_id,
+            dominio=dominio
+        ).first()
+
+        if dom:
+            # Actualizar contador
+            dom.cantidad_pdfs += 1
+            dom.ultimo_pdf = datetime.utcnow()
+        else:
+            # Crear nuevo
+            nombre = Compania.extraer_nombre_de_dominio(dominio)
+            dom = DominioRemitente(
+                usuario_id=usuario_id,
+                dominio=dominio,
+                nombre_mostrar=nombre,
+                cantidad_pdfs=1,
+                ultimo_pdf=datetime.utcnow()
+            )
+            db.session.add(dom)
+
+        return dom
+
+    @staticmethod
+    def registrar_email_especifico(usuario_id, email, nombre_mostrar=None):
+        """Registra una dirección de email específica como fuente de pólizas."""
+        email = email.lower().strip()
+
+        # Verificar si ya existe
+        existente = DominioRemitente.query.filter_by(
+            usuario_id=usuario_id,
+            dominio=email
+        ).first()
+
+        if existente:
+            return existente
+
+        # Crear nuevo
+        nuevo = DominioRemitente(
+            usuario_id=usuario_id,
+            dominio=email,
+            nombre_mostrar=nombre_mostrar or email.split('@')[0].replace('.', ' ').title(),
+            es_email_completo=True,
+            cantidad_pdfs=0,
+            activo=True
+        )
+        db.session.add(nuevo)
+        db.session.commit()
+        return nuevo
+
+    @staticmethod
+    def obtener_dominios_usuario(usuario_id, solo_activos=True):
+        """Obtiene lista de dominios del usuario ordenados por cantidad de PDFs."""
+        query = DominioRemitente.query.filter_by(usuario_id=usuario_id)
+        if solo_activos:
+            query = query.filter_by(activo=True)
+        return query.order_by(DominioRemitente.cantidad_pdfs.desc()).all()
+
+    def coincide_con_remitente(self, remitente):
+        """Verifica si este filtro coincide con un remitente dado."""
+        if not remitente:
+            return False
+
+        remitente_lower = remitente.lower()
+
+        if self.es_email_completo:
+            # Coincidencia exacta de email
+            return self.dominio in remitente_lower
+        else:
+            # Coincidencia de dominio
+            return f'@{self.dominio}' in remitente_lower
+
+    def __repr__(self):
+        tipo = 'Email' if self.es_email_completo else 'Dominio'
+        return f'<DominioRemitente {tipo}: {self.dominio} ({self.cantidad_pdfs} PDFs)>'
+
+
 class Compania(db.Model):
     """Modelo para compañías aseguradoras detectadas."""
 
@@ -180,6 +431,51 @@ class Compania(db.Model):
 
     # Relación con archivos
     archivos = db.relationship('ArchivoDescargado', backref='compania', lazy='dynamic')
+
+    @staticmethod
+    def extraer_nombre_de_dominio(dominio):
+        """Extrae un nombre legible de un dominio de email."""
+        import re
+
+        if not dominio:
+            return "Desconocido"
+
+        dominio = dominio.lower()
+
+        # Diccionario de dominios conocidos con nombres personalizados
+        dominios_conocidos = {
+            'gmail.com': 'Gmail',
+            'hotmail.com': 'Hotmail',
+            'outlook.com': 'Outlook',
+            'yahoo.com': 'Yahoo',
+            'yahoo.com.ar': 'Yahoo AR',
+            'hotmail.com.ar': 'Hotmail AR',
+            'starlink.com': 'Starlink',
+        }
+
+        if dominio in dominios_conocidos:
+            return dominios_conocidos[dominio]
+
+        # Quitar extensiones de país y TLDs comunes
+        # Primero quitar .com.ar, .gob.ar, etc (extensiones compuestas)
+        dominio_limpio = re.sub(r'\.(com|gob|org|net|edu)\.(ar|mx|es|br|cl|co|uy|py)$', '', dominio)
+        # Luego quitar extensiones simples
+        dominio_limpio = re.sub(r'\.(com|net|org|edu|gob|ar|es|mx|br)$', '', dominio_limpio)
+
+        # Dividir por puntos y tomar la parte principal
+        partes = dominio_limpio.split('.')
+
+        # Tomar la primera parte significativa (antes de subdominios como mail, www)
+        nombre = partes[0]
+        if nombre in ('mail', 'www', 'smtp', 'correo', 'email') and len(partes) > 1:
+            nombre = partes[1]
+
+        # Capitalizar correctamente
+        # Si tiene "seguros" al final, separar
+        if 'seguros' in nombre.lower():
+            nombre = nombre.lower().replace('seguros', ' Seguros')
+
+        return nombre.strip().title()
 
     @staticmethod
     def detectar_o_crear(remitente):
@@ -200,10 +496,8 @@ class Compania(db.Model):
         compania = Compania.query.filter_by(dominio_email=dominio).first()
 
         if not compania:
-            # Crear nueva compañía
-            # Normalizar nombre: "seguros.mapfre.com" -> "Mapfre"
-            partes = dominio.replace('.com', '').replace('.es', '').replace('.net', '').split('.')
-            nombre = partes[-1].capitalize() if partes else dominio
+            # Crear nueva compañía con nombre extraído correctamente
+            nombre = Compania.extraer_nombre_de_dominio(dominio)
 
             compania = Compania(
                 nombre=nombre,
@@ -231,23 +525,47 @@ class ArchivoDescargado(db.Model):
     __tablename__ = 'archivos_descargados'
 
     id = db.Column(db.Integer, primary_key=True)
-    escaneo_id = db.Column(db.Integer, db.ForeignKey('escaneos.id'), nullable=False)
+    id_documento = db.Column(db.String(10), nullable=True, unique=True, index=True)  # ID visible: PDF-0001
+    escaneo_id = db.Column(db.Integer, db.ForeignKey('escaneos.id'), nullable=False, index=True)
     nombre_archivo = db.Column(db.String(255), nullable=False)
     ruta_archivo = db.Column(db.String(500), nullable=False)
     tamano_bytes = db.Column(db.Integer, nullable=True)
-    hash_archivo = db.Column(db.String(64), nullable=True)  # SHA-256
+    hash_archivo = db.Column(db.String(64), nullable=True, index=True)  # SHA-256
     remitente = db.Column(db.String(255), nullable=True)
     asunto = db.Column(db.String(500), nullable=True)
     fecha_correo = db.Column(db.DateTime, nullable=True)
-    fecha_descarga = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha_descarga = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     # Campos para organización por compañía
-    compania_id = db.Column(db.Integer, db.ForeignKey('companias.id'), nullable=True)
+    compania_id = db.Column(db.Integer, db.ForeignKey('companias.id'), nullable=True, index=True)
     nombre_compania_original = db.Column(db.String(255), nullable=True)
     cuenta_origen = db.Column(db.String(120), nullable=True)  # Email de la cuenta Gmail origen
 
+    # ========== ESTADO DE CONFIRMACIÓN ==========
+    estado_confirmacion = db.Column(db.String(20), default='pendiente')  # pendiente, definitivo
+    fecha_confirmacion = db.Column(db.DateTime, nullable=True)
+    confirmado_por = db.Column(db.String(50), nullable=True)  # 'whatsapp_read', 'manual'
+
+    @staticmethod
+    def generar_siguiente_id():
+        """Genera el siguiente ID de documento disponible."""
+        from sqlalchemy import func
+        ultimo = db.session.query(func.max(ArchivoDescargado.id)).scalar() or 0
+        # Buscar el número más alto en id_documento existente
+        ultimo_doc = db.session.query(ArchivoDescargado.id_documento).filter(
+            ArchivoDescargado.id_documento.isnot(None)
+        ).order_by(ArchivoDescargado.id_documento.desc()).first()
+
+        if ultimo_doc and ultimo_doc[0]:
+            try:
+                num = int(ultimo_doc[0].replace('PDF-', ''))
+                return f"PDF-{num + 1:04d}"
+            except:
+                pass
+        return f"PDF-{ultimo + 1:04d}"
+
     def __repr__(self):
-        return f'<ArchivoDescargado {self.nombre_archivo}>'
+        return f'<ArchivoDescargado {self.id_documento or self.id}: {self.nombre_archivo}>'
 
 
 class LogActividad(db.Model):
@@ -256,8 +574,8 @@ class LogActividad(db.Model):
     __tablename__ = 'logs_actividad'
 
     id = db.Column(db.Integer, primary_key=True)
-    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id'), nullable=True)
-    accion = db.Column(db.String(100), nullable=False)
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id'), nullable=True, index=True)
+    accion = db.Column(db.String(100), nullable=False, index=True)
     detalle = db.Column(db.Text, nullable=True)
     direccion_ip = db.Column(db.String(50), nullable=True)
     user_agent = db.Column(db.String(255), nullable=True)
@@ -291,18 +609,23 @@ class Cliente(db.Model):
     __tablename__ = 'clientes'
 
     id = db.Column(db.Integer, primary_key=True)
-    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id'), nullable=False)
-    nombre = db.Column(db.String(100), nullable=False)
-    apellido = db.Column(db.String(100), nullable=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id'), nullable=False, index=True)
+    nombre = db.Column(db.String(100), nullable=False, index=True)
+    apellido = db.Column(db.String(100), nullable=True, index=True)
     telefono_whatsapp = db.Column(db.String(20), nullable=False)
     email = db.Column(db.String(120), nullable=True)
-    documento_identidad = db.Column(db.String(30), nullable=True)
+    documento_identidad = db.Column(db.String(30), nullable=True, index=True)
     notas = db.Column(db.Text, nullable=True)
     mensaje_personalizado = db.Column(db.Text, nullable=True)
     usar_mensaje_estandar = db.Column(db.Boolean, default=True)
-    activo = db.Column(db.Boolean, default=True)
+    activo = db.Column(db.Boolean, default=True, index=True)
     fecha_registro = db.Column(db.DateTime, default=datetime.utcnow)
     ultimo_envio = db.Column(db.DateTime, nullable=True)
+
+    # Estado de cliente actual (para seguimiento CRM)
+    es_cliente_actual = db.Column(db.Boolean, default=True, index=True)
+    fecha_evaluacion_actual = db.Column(db.DateTime, nullable=True)
+    motivo_no_actual = db.Column(db.String(100), nullable=True)  # sin_comunicacion, sin_poliza_reciente, ambos
 
     # Relaciones
     polizas = db.relationship('PolizaCliente', backref='cliente', lazy='dynamic',
@@ -319,11 +642,85 @@ class Cliente(db.Model):
 
     @property
     def telefono_formateado(self):
-        """Devuelve el teléfono en formato internacional."""
-        tel = self.telefono_whatsapp.replace(' ', '').replace('-', '')
-        if not tel.startswith('+'):
-            tel = '+' + tel
-        return tel
+        """Devuelve el teléfono en formato internacional para Argentina."""
+        if not self.telefono_whatsapp:
+            return None
+        # Limpiar caracteres no numéricos excepto +
+        tel = ''.join(c for c in self.telefono_whatsapp if c.isdigit() or c == '+')
+
+        # Si ya tiene código de país completo, retornar
+        if tel.startswith('+'):
+            return tel
+        if tel.startswith('54') and len(tel) > 10:
+            return '+' + tel
+
+        # Quitar 0 inicial (prefijo local argentino)
+        if tel.startswith('0'):
+            tel = tel[1:]
+
+        # Agregar código de Argentina
+        return '+54' + tel
+
+    def evaluar_si_actual(self):
+        """
+        Evalúa si el cliente cumple criterios de 'cliente actual'.
+
+        Criterios:
+        1. Comunicación exitosa en últimos 6 meses (WhatsApp enviado)
+        2. Póliza emitida/vigente en el último año
+
+        Returns:
+            tuple: (es_actual: bool, detalles: dict)
+        """
+        from datetime import timedelta
+
+        hoy = datetime.utcnow()
+
+        # Criterio 1: Comunicación en últimos 6 meses
+        hace_6_meses = hoy - timedelta(days=180)
+        tiene_comunicacion = self.ultimo_envio is not None and self.ultimo_envio >= hace_6_meses
+
+        # Criterio 2: Póliza emitida en último año (o con vigencia activa)
+        hace_1_anio = (hoy - timedelta(days=365)).date()
+        tiene_poliza_reciente = False
+
+        for poliza in self.polizas:
+            if poliza.estado not in ('activa', 'en_renovacion'):
+                continue
+            # Verificar si la póliza fue emitida en el último año
+            if poliza.fecha_vigencia_desde and poliza.fecha_vigencia_desde >= hace_1_anio:
+                tiene_poliza_reciente = True
+                break
+            # O si aún está vigente
+            if poliza.fecha_vigencia_hasta and poliza.fecha_vigencia_hasta >= hoy.date():
+                tiene_poliza_reciente = True
+                break
+
+        es_actual = tiene_comunicacion and tiene_poliza_reciente
+
+        return es_actual, {
+            'comunicacion': tiene_comunicacion,
+            'poliza': tiene_poliza_reciente
+        }
+
+    def actualizar_estado_actual(self):
+        """Actualiza el estado de cliente actual y guarda el motivo si no lo es."""
+        es_actual, detalles = self.evaluar_si_actual()
+
+        self.es_cliente_actual = es_actual
+        self.fecha_evaluacion_actual = datetime.utcnow()
+
+        if not es_actual:
+            if not detalles['comunicacion'] and not detalles['poliza']:
+                self.motivo_no_actual = 'ambos'
+            elif not detalles['comunicacion']:
+                self.motivo_no_actual = 'sin_comunicacion'
+            else:
+                self.motivo_no_actual = 'sin_poliza_reciente'
+        else:
+            self.motivo_no_actual = None
+
+        return es_actual, detalles
 
     def __repr__(self):
         return f'<Cliente {self.nombre_completo}>'
@@ -335,13 +732,14 @@ class PolizaCliente(db.Model):
     __tablename__ = 'polizas_cliente'
 
     id = db.Column(db.Integer, primary_key=True)
-    cliente_id = db.Column(db.Integer, db.ForeignKey('clientes.id'), nullable=False)
-    archivo_id = db.Column(db.Integer, db.ForeignKey('archivos_descargados.id'), nullable=True)
-    compania_id = db.Column(db.Integer, db.ForeignKey('companias.id'), nullable=True)
-    numero_poliza = db.Column(db.String(50), nullable=True)
-    tipo_seguro = db.Column(db.String(50), nullable=True)  # auto, vida, hogar, salud, etc.
-    fecha_vigencia_desde = db.Column(db.Date, nullable=True)
-    fecha_vigencia_hasta = db.Column(db.Date, nullable=True)
+    cliente_id = db.Column(db.Integer, db.ForeignKey('clientes.id'), nullable=False, index=True)
+    archivo_id = db.Column(db.Integer, db.ForeignKey('archivos_descargados.id'), nullable=True, index=True)
+    compania_id = db.Column(db.Integer, db.ForeignKey('companias.id'), nullable=True, index=True)
+    inmobiliaria_id = db.Column(db.Integer, db.ForeignKey('inmobiliarias.id'), nullable=True, index=True)
+    numero_poliza = db.Column(db.String(50), nullable=True, index=True)
+    tipo_seguro = db.Column(db.String(50), nullable=True, index=True)
+    fecha_vigencia_desde = db.Column(db.Date, nullable=True, index=True)
+    fecha_vigencia_hasta = db.Column(db.Date, nullable=True, index=True)
     prima_anual = db.Column(db.Numeric(10, 2), nullable=True)
     notas = db.Column(db.Text, nullable=True)
     fecha_asignacion = db.Column(db.DateTime, default=datetime.utcnow)
@@ -384,11 +782,16 @@ class PolizaCliente(db.Model):
     beneficiarios = db.Column(db.Text, nullable=True)  # JSON con lista de beneficiarios
 
     # ========== ESTADO Y RENOVACIÓN ==========
-    estado = db.Column(db.String(20), default='activa')  # activa, vencida, cancelada, en_renovacion, suspendida
+    estado = db.Column(db.String(20), default='activa', index=True)  # activa, vencida, cancelada, en_renovacion, suspendida
     renovacion_automatica = db.Column(db.Boolean, default=False)
     poliza_anterior_id = db.Column(db.Integer, db.ForeignKey('polizas_cliente.id'), nullable=True)
     motivo_cancelacion = db.Column(db.Text, nullable=True)
     fecha_cancelacion = db.Column(db.Date, nullable=True)
+
+    # ========== ESTADO DE CONFIRMACIÓN ==========
+    estado_confirmacion = db.Column(db.String(20), default='pendiente')  # pendiente, definitivo
+    fecha_confirmacion = db.Column(db.DateTime, nullable=True)
+    confirmado_por = db.Column(db.String(50), nullable=True)  # 'whatsapp_read', 'manual'
 
     # ========== FORMA DE PAGO ==========
     forma_pago = db.Column(db.String(20), nullable=True)  # anual, semestral, trimestral, mensual
@@ -408,6 +811,10 @@ class PolizaCliente(db.Model):
     requiere_revision = db.Column(db.Boolean, default=False)
     fecha_extraccion = db.Column(db.DateTime, nullable=True)
 
+    # ========== BACKUP DEL PDF ==========
+    ruta_pdf_backup = db.Column(db.String(500), nullable=True)  # Ruta al PDF guardado permanentemente
+    fecha_backup = db.Column(db.DateTime, nullable=True)  # Cuando se hizo el backup
+
     # ========== AUDITORÍA ==========
     fecha_ultima_modificacion = db.Column(db.DateTime, nullable=True, onupdate=datetime.utcnow)
     modificado_por_id = db.Column(db.Integer, db.ForeignKey('usuarios.id'), nullable=True)
@@ -415,6 +822,7 @@ class PolizaCliente(db.Model):
     # Relaciones
     archivo = db.relationship('ArchivoDescargado', backref='polizas_asignadas')
     compania = db.relationship('Compania', backref='polizas_asignadas')
+    inmobiliaria = db.relationship('Inmobiliaria', backref='polizas')
     envios = db.relationship('EnvioWhatsApp', backref='poliza', lazy='dynamic')
     poliza_anterior = db.relationship('PolizaCliente', remote_side=[id], backref='renovaciones')
     modificado_por = db.relationship('Usuario', foreign_keys=[modificado_por_id])
@@ -424,6 +832,7 @@ class PolizaCliente(db.Model):
         ('moto', 'Motocicleta'),
         ('vida', 'Vida'),
         ('hogar', 'Hogar'),
+        ('incendio', 'Incendio'),
         ('salud', 'Salud'),
         ('accidentes', 'Accidentes Personales'),
         ('responsabilidad', 'Responsabilidad Civil'),
@@ -525,6 +934,12 @@ class PolizaCliente(db.Model):
         import json
         self.beneficiarios = json.dumps(lista_beneficiarios)
 
+    def marcar_definitivo(self, origen='manual'):
+        """Marca la póliza como definitiva/confirmada."""
+        self.estado_confirmacion = 'definitivo'
+        self.fecha_confirmacion = datetime.utcnow()
+        self.confirmado_por = origen
+
     def __repr__(self):
         return f'<PolizaCliente {self.numero_poliza or self.id}>'
 
@@ -545,6 +960,12 @@ class EnvioWhatsApp(db.Model):
     mensaje_error = db.Column(db.Text, nullable=True)
     intentos = db.Column(db.Integer, default=0)
 
+    # ========== TRACKING WHATSAPP ==========
+    wamid = db.Column(db.String(100), nullable=True, index=True)  # WhatsApp Message ID
+    estado_mensaje = db.Column(db.String(20), nullable=True)  # sent, delivered, read, failed
+    fecha_entregado = db.Column(db.DateTime, nullable=True)
+    fecha_leido = db.Column(db.DateTime, nullable=True)
+
     # Relaciones
     archivo = db.relationship('ArchivoDescargado', backref='envios')
 
@@ -559,6 +980,28 @@ class EnvioWhatsApp(db.Model):
         self.estado = 'error'
         self.mensaje_error = mensaje
         self.intentos += 1
+
+    def actualizar_estado_mensaje(self, nuevo_estado, timestamp=None):
+        """Actualiza el estado del mensaje de WhatsApp y marca como definitivo si es leído."""
+        self.estado_mensaje = nuevo_estado
+
+        if nuevo_estado == 'delivered':
+            self.fecha_entregado = timestamp or datetime.utcnow()
+        elif nuevo_estado == 'read':
+            self.fecha_leido = timestamp or datetime.utcnow()
+            # Marcar póliza como definitiva
+            if self.poliza:
+                self.poliza.marcar_definitivo('whatsapp_read')
+            # Marcar archivo como definitivo
+            if self.archivo:
+                self.archivo.estado_confirmacion = 'definitivo'
+                self.archivo.fecha_confirmacion = datetime.utcnow()
+                self.archivo.confirmado_por = 'whatsapp_read'
+
+    @staticmethod
+    def buscar_por_wamid(wamid):
+        """Busca un envío por su WhatsApp Message ID."""
+        return EnvioWhatsApp.query.filter_by(wamid=wamid).first()
 
     def __repr__(self):
         return f'<EnvioWhatsApp {self.id} - {self.estado}>'
@@ -899,7 +1342,21 @@ class CorreoProcesado(db.Model):
     @staticmethod
     def registrar_procesado(cuenta_gmail_id, message_id, carpeta, fecha_correo=None,
                            remitente=None, asunto=None, tiene_pdfs=False, pdfs_descargados=0):
-        """Registra un correo como procesado."""
+        """Registra un correo como procesado. Ignora si ya existe."""
+        # Verificar si ya existe para evitar IntegrityError
+        existente = CorreoProcesado.query.filter_by(
+            cuenta_gmail_id=cuenta_gmail_id,
+            message_id=message_id,
+            carpeta=carpeta
+        ).first()
+
+        if existente:
+            # Ya existe - actualizar si tiene nuevos PDFs
+            if tiene_pdfs and not existente.tiene_pdfs:
+                existente.tiene_pdfs = True
+                existente.pdfs_descargados = pdfs_descargados
+            return existente
+
         registro = CorreoProcesado(
             cuenta_gmail_id=cuenta_gmail_id,
             message_id=message_id,
@@ -953,6 +1410,19 @@ class HistorialEscaneoCarpeta(db.Model):
             carpeta=carpeta
         ).first()
         return historial.ultima_fecha_escaneada if historial else None
+
+    @staticmethod
+    def obtener_fecha_mas_reciente_procesada(cuenta_gmail_id, carpeta):
+        """
+        Obtiene la fecha del correo MAS RECIENTE ya procesado.
+        Usado para optimizar: no re-escanear correos anteriores a esta fecha.
+        """
+        from sqlalchemy import func
+        resultado = db.session.query(func.max(CorreoProcesado.fecha_correo)).filter_by(
+            cuenta_gmail_id=cuenta_gmail_id,
+            carpeta=carpeta
+        ).scalar()
+        return resultado
 
     @staticmethod
     def actualizar_historial(cuenta_gmail_id, carpeta, ultima_fecha, correos_totales=0,
@@ -1093,3 +1563,535 @@ class Siniestro(db.Model):
 
     def __repr__(self):
         return f'<Siniestro {self.numero_siniestro or self.id} - {self.estado}>'
+
+
+class RegistroAnalisisPDF(db.Model):
+    """
+    Modelo para registrar el análisis de PDFs y su procesamiento.
+    Permite saber qué PDFs fueron analizados, cuándo, y qué se creó a partir de ellos.
+    """
+
+    __tablename__ = 'registros_analisis_pdf'
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # PDF analizado
+    archivo_id = db.Column(db.Integer, db.ForeignKey('archivos_descargados.id'), nullable=False)
+
+    # Cuenta de origen (de dónde vino el PDF)
+    cuenta_gmail_id = db.Column(db.Integer, db.ForeignKey('cuentas_gmail.id'), nullable=True)
+    cuenta_origen = db.Column(db.String(120), nullable=True)  # Email de la cuenta
+
+    # Rango de fechas del escaneo original
+    fecha_correo = db.Column(db.DateTime, nullable=True)  # Fecha del correo que contenía el PDF
+
+    # Estado del análisis
+    estado = db.Column(db.String(20), default='pendiente')  # pendiente, analizado, procesado, omitido, error
+    fecha_analisis = db.Column(db.DateTime, nullable=True)  # Cuándo se analizó
+    fecha_procesamiento = db.Column(db.DateTime, nullable=True)  # Cuándo se creó cliente/póliza
+
+    # Resultados del análisis
+    confianza_extraccion = db.Column(db.Float, nullable=True)  # 0.0 a 1.0
+    datos_extraidos = db.Column(db.Text, nullable=True)  # JSON con datos extraídos
+    compania_detectada = db.Column(db.String(100), nullable=True)
+    tipo_seguro_detectado = db.Column(db.String(50), nullable=True)
+    numero_poliza_detectado = db.Column(db.String(100), nullable=True)
+
+    # Fechas de vigencia detectadas (para ordenamiento y filtrado)
+    fecha_vigencia_desde_detectada = db.Column(db.Date, nullable=True)
+    fecha_vigencia_hasta_detectada = db.Column(db.Date, nullable=True)
+    asegurado_detectado = db.Column(db.String(200), nullable=True)
+
+    # Resultados del procesamiento
+    cliente_id = db.Column(db.Integer, db.ForeignKey('clientes.id'), nullable=True)
+    poliza_id = db.Column(db.Integer, db.ForeignKey('polizas_cliente.id'), nullable=True)
+    cliente_creado = db.Column(db.Boolean, default=False)  # Si se creó cliente nuevo
+    poliza_creada = db.Column(db.Boolean, default=False)  # Si se creó póliza nueva
+
+    # Usuario que procesó
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id'), nullable=True)
+
+    # Notas
+    notas = db.Column(db.Text, nullable=True)
+    motivo_omision = db.Column(db.String(255), nullable=True)  # Si fue omitido, por qué
+
+    # Relaciones
+    archivo = db.relationship('ArchivoDescargado', backref=db.backref('registro_analisis', uselist=False))
+    cuenta = db.relationship('CuentaGmail', backref=db.backref('registros_analisis', lazy='dynamic'))
+    cliente = db.relationship('Cliente', backref=db.backref('registros_analisis', lazy='dynamic'))
+    poliza = db.relationship('PolizaCliente', backref=db.backref('registro_analisis', uselist=False))
+    usuario = db.relationship('Usuario', backref=db.backref('registros_analisis', lazy='dynamic'))
+
+    # Índices
+    __table_args__ = (
+        db.Index('ix_registro_analisis_estado', 'estado'),
+        db.Index('ix_registro_analisis_fecha', 'fecha_analisis'),
+        db.Index('ix_registro_analisis_vigencia', 'fecha_vigencia_hasta_detectada'),
+    )
+
+    ESTADOS = [
+        ('pendiente', 'Pendiente de análisis'),
+        ('analizado', 'Analizado (sin procesar)'),
+        ('procesado', 'Procesado (cliente/póliza creada)'),
+        ('omitido', 'Omitido manualmente'),
+        ('error', 'Error en análisis'),
+    ]
+
+    @staticmethod
+    def obtener_o_crear(archivo_id):
+        """Obtiene o crea un registro de análisis para un archivo."""
+        registro = RegistroAnalisisPDF.query.filter_by(archivo_id=archivo_id).first()
+        if not registro:
+            # Obtener datos del archivo
+            archivo = ArchivoDescargado.query.get(archivo_id)
+            if archivo:
+                registro = RegistroAnalisisPDF(
+                    archivo_id=archivo_id,
+                    cuenta_origen=archivo.cuenta_origen,
+                    fecha_correo=archivo.fecha_correo,
+                )
+                # Buscar cuenta por correo
+                if archivo.cuenta_origen:
+                    cuenta = CuentaGmail.query.filter_by(correo_gmail=archivo.cuenta_origen).first()
+                    if cuenta:
+                        registro.cuenta_gmail_id = cuenta.id
+                db.session.add(registro)
+                db.session.flush()
+        return registro
+
+    def marcar_analizado(self, datos_json, confianza, compania=None, tipo_seguro=None, numero_poliza=None,
+                         fecha_vigencia_desde=None, fecha_vigencia_hasta=None, asegurado=None):
+        """Marca el registro como analizado."""
+        self.estado = 'analizado'
+        self.fecha_analisis = datetime.utcnow()
+        self.datos_extraidos = datos_json
+        self.confianza_extraccion = confianza
+        self.compania_detectada = compania
+        self.tipo_seguro_detectado = tipo_seguro
+        self.numero_poliza_detectado = numero_poliza
+        self.fecha_vigencia_desde_detectada = fecha_vigencia_desde
+        self.fecha_vigencia_hasta_detectada = fecha_vigencia_hasta
+        self.asegurado_detectado = asegurado
+
+    def marcar_procesado(self, cliente_id, poliza_id, cliente_nuevo=False, poliza_nueva=False, usuario_id=None):
+        """Marca el registro como procesado."""
+        self.estado = 'procesado'
+        self.fecha_procesamiento = datetime.utcnow()
+        self.cliente_id = cliente_id
+        self.poliza_id = poliza_id
+        self.cliente_creado = cliente_nuevo
+        self.poliza_creada = poliza_nueva
+        self.usuario_id = usuario_id
+
+    def marcar_omitido(self, motivo=None, usuario_id=None):
+        """Marca el registro como omitido."""
+        self.estado = 'omitido'
+        self.fecha_procesamiento = datetime.utcnow()
+        self.motivo_omision = motivo
+        self.usuario_id = usuario_id
+
+    def marcar_error(self, notas=None):
+        """Marca el registro como error."""
+        self.estado = 'error'
+        self.fecha_analisis = datetime.utcnow()
+        self.notas = notas
+
+    @staticmethod
+    def obtener_estadisticas():
+        """Obtiene estadísticas de procesamiento."""
+        from sqlalchemy import func
+
+        total = RegistroAnalisisPDF.query.count()
+        por_estado = db.session.query(
+            RegistroAnalisisPDF.estado,
+            func.count(RegistroAnalisisPDF.id)
+        ).group_by(RegistroAnalisisPDF.estado).all()
+
+        return {
+            'total': total,
+            'por_estado': dict(por_estado),
+            'pendientes': sum(1 for e, c in por_estado if e == 'pendiente'),
+            'procesados': sum(1 for e, c in por_estado if e == 'procesado'),
+        }
+
+    @staticmethod
+    def obtener_por_cuenta(cuenta_gmail_id=None):
+        """Obtiene registros filtrados por cuenta."""
+        query = RegistroAnalisisPDF.query
+        if cuenta_gmail_id:
+            query = query.filter_by(cuenta_gmail_id=cuenta_gmail_id)
+        return query.order_by(RegistroAnalisisPDF.fecha_correo.desc()).all()
+
+    def __repr__(self):
+        return f'<RegistroAnalisisPDF {self.id} - {self.estado}>'
+
+
+# ============================================================================
+# MODELOS DE INMOBILIARIAS - Gestión de pólizas de incendio/hogar
+# ============================================================================
+
+class Inmobiliaria(db.Model):
+    """
+    Modelo para inmobiliarias administradoras de inmuebles.
+    Las pólizas de tipo 'incendio' y 'hogar' pueden asignarse a una inmobiliaria.
+    """
+
+    __tablename__ = 'inmobiliarias'
+
+    id = db.Column(db.Integer, primary_key=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id'), nullable=False)
+    nombre = db.Column(db.String(150), nullable=False)
+    telefono_whatsapp = db.Column(db.String(30), nullable=True)  # Para notificaciones
+    email = db.Column(db.String(120), nullable=True)
+    persona_contacto = db.Column(db.String(100), nullable=True)
+    activa = db.Column(db.Boolean, default=True)
+    fecha_registro = db.Column(db.DateTime, default=datetime.utcnow)
+    notas = db.Column(db.Text, nullable=True)
+
+    # Relación con usuario
+    usuario = db.relationship('Usuario', backref=db.backref('inmobiliarias', lazy='dynamic'))
+
+    # Índice único por usuario y nombre
+    __table_args__ = (
+        db.UniqueConstraint('usuario_id', 'nombre', name='uq_inmobiliaria_usuario_nombre'),
+    )
+
+    @property
+    def telefono_formateado(self):
+        """Devuelve el teléfono en formato internacional."""
+        if not self.telefono_whatsapp:
+            return None
+        tel = self.telefono_whatsapp.replace(' ', '').replace('-', '')
+        if not tel.startswith('+'):
+            tel = '+' + tel
+        return tel
+
+    def cantidad_polizas_activas(self):
+        """Retorna la cantidad de pólizas activas asignadas a esta inmobiliaria."""
+        return PolizaCliente.query.filter_by(
+            inmobiliaria_id=self.id,
+            estado='activa'
+        ).count()
+
+    def __repr__(self):
+        return f'<Inmobiliaria {self.nombre}>'
+
+
+class NotificacionInmobiliaria(db.Model):
+    """
+    Modelo para notificaciones pendientes a inmobiliarias.
+    Se procesan junto con la cola de WhatsApp existente.
+    """
+
+    __tablename__ = 'notificaciones_inmobiliaria'
+
+    id = db.Column(db.Integer, primary_key=True)
+    inmobiliaria_id = db.Column(db.Integer, db.ForeignKey('inmobiliarias.id'), nullable=False)
+    poliza_id = db.Column(db.Integer, db.ForeignKey('polizas_cliente.id'), nullable=False)
+    tipo = db.Column(db.String(30), nullable=False)  # vencimiento, renovacion, siniestro, cambio_estado
+    mensaje = db.Column(db.Text, nullable=True)
+    estado = db.Column(db.String(20), default='pendiente')  # pendiente, enviado, error
+    fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
+    fecha_envio = db.Column(db.DateTime, nullable=True)
+    intentos = db.Column(db.Integer, default=0)
+    mensaje_error = db.Column(db.Text, nullable=True)
+
+    # Relaciones
+    inmobiliaria = db.relationship('Inmobiliaria', backref=db.backref('notificaciones', lazy='dynamic'))
+    poliza = db.relationship('PolizaCliente', backref=db.backref('notificaciones_inmobiliaria', lazy='dynamic'))
+
+    TIPOS = [
+        ('vencimiento', 'Vencimiento Próximo'),
+        ('renovacion', 'Renovación'),
+        ('siniestro', 'Siniestro'),
+        ('cambio_estado', 'Cambio de Estado'),
+    ]
+
+    ESTADOS = [
+        ('pendiente', 'Pendiente'),
+        ('enviado', 'Enviado'),
+        ('error', 'Error'),
+    ]
+
+    def marcar_enviado(self):
+        """Marca la notificación como enviada."""
+        self.estado = 'enviado'
+        self.fecha_envio = datetime.utcnow()
+
+    def marcar_error(self, mensaje):
+        """Marca la notificación como error."""
+        self.estado = 'error'
+        self.mensaje_error = mensaje
+        self.intentos += 1
+
+    @staticmethod
+    def crear_notificacion(inmobiliaria_id, poliza_id, tipo, mensaje=None):
+        """Crea una notificación pendiente."""
+        notif = NotificacionInmobiliaria(
+            inmobiliaria_id=inmobiliaria_id,
+            poliza_id=poliza_id,
+            tipo=tipo,
+            mensaje=mensaje
+        )
+        db.session.add(notif)
+        return notif
+
+    @staticmethod
+    def obtener_pendientes(limite=50):
+        """Obtiene notificaciones pendientes de envío."""
+        return NotificacionInmobiliaria.query.filter_by(
+            estado='pendiente'
+        ).order_by(
+            NotificacionInmobiliaria.fecha_creacion.asc()
+        ).limit(limite).all()
+
+    def __repr__(self):
+        return f'<NotificacionInmobiliaria {self.id} - {self.tipo} - {self.estado}>'
+
+
+# ============================================================================
+# SESIONES DE WHATSAPP WEB POR USUARIO
+# ============================================================================
+
+class WhatsAppSession(db.Model):
+    """
+    Modelo para gestionar sesiones de WhatsApp Web por usuario.
+    Cada usuario puede tener su propio WhatsApp conectado para enviar pólizas.
+    """
+    __tablename__ = 'whatsapp_sessions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id'), unique=True, nullable=False)
+
+    # Estado de la sesión
+    estado = db.Column(db.String(20), default='disconnected')
+    # Valores: disconnected, qr_pending, authenticated, ready, error
+
+    # Información del WhatsApp conectado
+    telefono_conectado = db.Column(db.String(20), nullable=True)
+
+    # Fechas
+    fecha_conexion = db.Column(db.DateTime, nullable=True)
+    fecha_ultimo_uso = db.Column(db.DateTime, nullable=True)
+    fecha_desconexion = db.Column(db.DateTime, nullable=True)
+
+    # Control
+    activo = db.Column(db.Boolean, default=True)
+    mensaje_error = db.Column(db.Text, nullable=True)
+
+    # Relación
+    usuario = db.relationship('Usuario', backref=db.backref('whatsapp_session', uselist=False))
+
+    # Estados posibles
+    ESTADOS = [
+        ('disconnected', 'Desconectado'),
+        ('qr_pending', 'Esperando QR'),
+        ('authenticated', 'Autenticando'),
+        ('ready', 'Conectado'),
+        ('error', 'Error'),
+    ]
+
+    def marcar_conectado(self, telefono=None):
+        """Marca la sesión como conectada."""
+        self.estado = 'ready'
+        self.telefono_conectado = telefono
+        self.fecha_conexion = datetime.utcnow()
+        self.fecha_ultimo_uso = datetime.utcnow()
+        self.mensaje_error = None
+
+    def marcar_desconectado(self):
+        """Marca la sesión como desconectada."""
+        self.estado = 'disconnected'
+        self.fecha_desconexion = datetime.utcnow()
+
+    def marcar_error(self, mensaje):
+        """Marca la sesión con error."""
+        self.estado = 'error'
+        self.mensaje_error = mensaje
+
+    def actualizar_uso(self):
+        """Actualiza la fecha de último uso."""
+        self.fecha_ultimo_uso = datetime.utcnow()
+
+    @property
+    def esta_conectado(self):
+        """Verifica si la sesión está lista para usar."""
+        return self.estado == 'ready' and self.activo
+
+    @staticmethod
+    def obtener_o_crear(usuario_id):
+        """Obtiene la sesión del usuario o crea una nueva."""
+        session = WhatsAppSession.query.filter_by(usuario_id=usuario_id).first()
+        if not session:
+            session = WhatsAppSession(usuario_id=usuario_id)
+            db.session.add(session)
+            db.session.commit()
+        return session
+
+    def __repr__(self):
+        return f'<WhatsAppSession {self.usuario_id} - {self.estado}>'
+
+
+# ============================================================================
+# LOG DE CORRECCIONES DE EXTRACCION - Sistema de Aprendizaje Predictivo
+# ============================================================================
+
+class LogCorreccionExtraccion(db.Model):
+    """
+    Modelo para registrar correcciones que los usuarios hacen a los datos
+    extraídos automáticamente de los PDFs.
+
+    Estos registros se usan para:
+    1. Entrenar el algoritmo de extracción predictiva
+    2. Analizar patrones de error por compañía/tipo de seguro
+    3. Mejorar la confianza de extracciones futuras
+    """
+
+    __tablename__ = 'log_correcciones_extraccion'
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Referencias
+    usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id'), nullable=False)
+    archivo_id = db.Column(db.Integer, db.ForeignKey('archivos_descargados.id'), nullable=True)
+    poliza_id = db.Column(db.Integer, db.ForeignKey('polizas_cliente.id'), nullable=True)
+    cliente_id = db.Column(db.Integer, db.ForeignKey('clientes.id'), nullable=True)
+
+    # Información del campo corregido
+    campo = db.Column(db.String(50), nullable=False)  # ej: "cliente.nombre", "poliza.numero_poliza"
+    texto_original = db.Column(db.Text, nullable=True)  # Texto crudo extraído del PDF
+    valor_extraido = db.Column(db.Text, nullable=True)  # Valor que el algoritmo sugirió
+    valor_corregido = db.Column(db.Text, nullable=True)  # Valor que el usuario guardó
+
+    # Tipo de corrección
+    tipo_cambio = db.Column(db.String(20), nullable=False)
+    # Valores: edicion, agregado_manual, eliminacion
+
+    # Contexto para el aprendizaje
+    confianza_original = db.Column(db.Float, nullable=True)  # Confianza del algoritmo (0-1)
+    compania = db.Column(db.String(50), nullable=True)  # Compañía aseguradora
+    tipo_seguro = db.Column(db.String(30), nullable=True)  # auto, hogar, vida, etc.
+
+    # Metadata
+    fecha = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    sesion_id = db.Column(db.String(36), nullable=True)  # UUID para agrupar correcciones de una sesión
+
+    # Relaciones
+    usuario = db.relationship('Usuario', backref=db.backref('correcciones_extraccion', lazy='dynamic'))
+    archivo = db.relationship('ArchivoDescargado', backref=db.backref('correcciones', lazy='dynamic'))
+    poliza = db.relationship('PolizaCliente', backref=db.backref('correcciones', lazy='dynamic'))
+    cliente = db.relationship('Cliente', backref=db.backref('correcciones', lazy='dynamic'))
+
+    # Tipos de cambio válidos
+    TIPOS_CAMBIO = [
+        ('edicion', 'Edición'),
+        ('agregado_manual', 'Agregado Manual'),
+        ('eliminacion', 'Eliminación'),
+    ]
+
+    # Índices para consultas frecuentes
+    __table_args__ = (
+        db.Index('ix_correccion_campo_compania', 'campo', 'compania'),
+        db.Index('ix_correccion_fecha', 'fecha'),
+        db.Index('ix_correccion_sesion', 'sesion_id'),
+    )
+
+    @staticmethod
+    def registrar(usuario_id, campo, tipo_cambio, texto_original=None,
+                  valor_extraido=None, valor_corregido=None, confianza_original=None,
+                  compania=None, tipo_seguro=None, archivo_id=None, poliza_id=None,
+                  cliente_id=None, sesion_id=None):
+        """
+        Registra una corrección de extracción.
+
+        Returns:
+            LogCorreccionExtraccion: El registro creado
+        """
+        log = LogCorreccionExtraccion(
+            usuario_id=usuario_id,
+            archivo_id=archivo_id,
+            poliza_id=poliza_id,
+            cliente_id=cliente_id,
+            campo=campo,
+            texto_original=texto_original,
+            valor_extraido=valor_extraido,
+            valor_corregido=valor_corregido,
+            tipo_cambio=tipo_cambio,
+            confianza_original=confianza_original,
+            compania=compania,
+            tipo_seguro=tipo_seguro,
+            sesion_id=sesion_id
+        )
+        db.session.add(log)
+        return log
+
+    @staticmethod
+    def obtener_estadisticas_campo(campo, compania=None, limite_dias=90):
+        """
+        Obtiene estadísticas de correcciones para un campo específico.
+
+        Args:
+            campo: Nombre del campo (ej: "cliente.nombre")
+            compania: Filtrar por compañía (opcional)
+            limite_dias: Días hacia atrás a considerar
+
+        Returns:
+            dict: Estadísticas del campo
+        """
+        from sqlalchemy import func
+
+        fecha_limite = datetime.utcnow() - timedelta(days=limite_dias)
+
+        query = LogCorreccionExtraccion.query.filter(
+            LogCorreccionExtraccion.campo == campo,
+            LogCorreccionExtraccion.fecha >= fecha_limite
+        )
+
+        if compania:
+            query = query.filter(LogCorreccionExtraccion.compania == compania)
+
+        total = query.count()
+
+        por_tipo = db.session.query(
+            LogCorreccionExtraccion.tipo_cambio,
+            func.count(LogCorreccionExtraccion.id)
+        ).filter(
+            LogCorreccionExtraccion.campo == campo,
+            LogCorreccionExtraccion.fecha >= fecha_limite
+        ).group_by(LogCorreccionExtraccion.tipo_cambio).all()
+
+        return {
+            'campo': campo,
+            'total_correcciones': total,
+            'por_tipo': dict(por_tipo),
+            'periodo_dias': limite_dias
+        }
+
+    @staticmethod
+    def obtener_campos_problematicos(usuario_id=None, limite=10):
+        """
+        Obtiene los campos que más correcciones requieren.
+
+        Returns:
+            list: Lista de campos ordenados por cantidad de correcciones
+        """
+        from sqlalchemy import func
+
+        query = db.session.query(
+            LogCorreccionExtraccion.campo,
+            LogCorreccionExtraccion.compania,
+            func.count(LogCorreccionExtraccion.id).label('total')
+        )
+
+        if usuario_id:
+            query = query.filter(LogCorreccionExtraccion.usuario_id == usuario_id)
+
+        return query.group_by(
+            LogCorreccionExtraccion.campo,
+            LogCorreccionExtraccion.compania
+        ).order_by(
+            func.count(LogCorreccionExtraccion.id).desc()
+        ).limit(limite).all()
+
+    def __repr__(self):
+        return f'<LogCorreccionExtraccion {self.id} - {self.campo} - {self.tipo_cambio}>'
