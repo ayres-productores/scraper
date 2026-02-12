@@ -699,6 +699,20 @@ class ArchivoDescargado(db.Model):
     # ========== REPOSITORIO CENTRAL ==========
     archivo_repo_id = db.Column(db.Integer, db.ForeignKey('archivos_repositorio.id'), nullable=True, index=True)
 
+    # ========== DATOS ASEGURADO EXTRAÍDOS (al momento del escaneo) ==========
+    asegurado_nombre_extraido = db.Column(db.String(255), nullable=True)
+    asegurado_documento_extraido = db.Column(db.String(50), nullable=True, index=True)
+
+    # ========== CLIENTE EXISTENTE DETECTADO ==========
+    cliente_existente_id = db.Column(db.Integer, db.ForeignKey('clientes.id'), nullable=True, index=True)
+    cliente_match_tipo = db.Column(db.String(20), nullable=True)  # 'documento', 'nombre_fuzzy', None
+    cliente_match_confianza = db.Column(db.Float, nullable=True)  # 0.0 - 1.0
+    fecha_matching = db.Column(db.DateTime, nullable=True)
+
+    # Relación con cliente existente
+    cliente_existente = db.relationship('Cliente', foreign_keys=[cliente_existente_id],
+                                        backref=db.backref('archivos_vinculados', lazy='dynamic'))
+
     def obtener_ruta_fisica(self):
         """Obtiene la ruta física del archivo (repositorio o legacy)."""
         if self.archivo_repo:

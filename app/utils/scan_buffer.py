@@ -360,6 +360,16 @@ class ScanBuffer:
                         archivo_repo_id=archivo_repo.id if archivo_repo else None
                     )
                     db_session.add(archivo)
+
+                    # Extraer datos del asegurado y hacer matching con cliente existente
+                    try:
+                        self._extraer_y_vincular_cliente(
+                            archivo, pdf_data['ruta_archivo'], db_session
+                        )
+                    except Exception as match_err:
+                        logger.debug(f"Error en matching cliente para {pdf_data['nombre_archivo']}: {match_err}")
+                        # No fallar el escaneo por error de matching
+
                     resultados['pdfs_insertados'] += 1
                 except Exception as e:
                     resultados['errores'].append(f"PDF {pdf_data.get('nombre_archivo')}: {e}")
@@ -426,6 +436,80 @@ class ScanBuffer:
                 os.remove(temp_file)
         except Exception:
             pass
+
+    def _extraer_y_vincular_cliente(self, archivo, ruta_pdf: str, db_session):
+        """
+        Extrae datos del asegurado del PDF y busca cliente existente.
+
+        Este método se ejecuta al momento de crear cada ArchivoDescargado,
+        permitiendo detectar clientes existentes antes de que el usuario
+        procese manualmente el PDF.
+
+        Args:
+            archivo: Instancia de ArchivoDescargado (ya agregada a la sesión)
+            ruta_pdf: Ruta física del archivo PDF
+            db_session: Sesión de SQLAlchemy activa
+        """
+        from datetime import datetime as dt
+        import os
+
+        # Verificar que el archivo existe
+        if not os.path.exists(ruta_pdf):
+            return
+
+        # Importar extractor y matcher
+        try:
+            from app.extractor.pdf_parser import ExtractorDatosPoliza
+            from app.extractor.cliente_matcher import ClienteMatcher
+        except ImportError as e:
+            logger.warning(f"No se pudo importar módulos de extracción: {e}")
+            return
+
+        # Extraer datos básicos del asegurado
+        try:
+            extractor = ExtractorDatosPoliza()
+            datos = extractor.extraer_datos(ruta_pdf)
+        except Exception as e:
+            logger.debug(f"Error extrayendo datos de {ruta_pdf}: {e}")
+            return
+
+        # Guardar datos del asegurado extraídos
+        asegurado_nombre = datos.get('asegurado_nombre')
+        asegurado_documento = datos.get('asegurado_documento')
+
+        if asegurado_nombre:
+            archivo.asegurado_nombre_extraido = str(asegurado_nombre)[:255]
+        if asegurado_documento:
+            archivo.asegurado_documento_extraido = str(asegurado_documento)[:50]
+
+        # Si no tenemos datos para hacer matching, terminar aquí
+        if not asegurado_nombre and not asegurado_documento:
+            return
+
+        # Buscar cliente existente
+        if not self.usuario_id:
+            logger.debug("No hay usuario_id para hacer matching de cliente")
+            return
+
+        try:
+            matcher = ClienteMatcher(db_session=db_session)
+            cliente, tipo_match, confianza = matcher.buscar_cliente(
+                usuario_id=self.usuario_id,
+                documento=asegurado_documento,
+                nombre=asegurado_nombre
+            )
+
+            if cliente:
+                archivo.cliente_existente_id = cliente.id
+                archivo.cliente_match_tipo = tipo_match
+                archivo.cliente_match_confianza = confianza
+                archivo.fecha_matching = dt.utcnow()
+                logger.debug(
+                    f"Cliente existente encontrado para {archivo.nombre_archivo}: "
+                    f"{cliente.nombre_completo} (tipo={tipo_match}, conf={confianza:.2f})"
+                )
+        except Exception as e:
+            logger.debug(f"Error buscando cliente existente: {e}")
 
     def descartar(self):
         """Descarta el buffer sin consolidar (para cancelaciones)."""

@@ -6,11 +6,19 @@
 <div class="page-header">
     <h1>Archivos Descargados</h1>
     <div class="header-actions">
+        {% if correcciones_pendientes > 0 %}
+        <a href="{{ url_for('main.repaso_correcciones') }}" class="btn btn-warning">
+            &#9888; Repaso ({{ correcciones_pendientes }})
+        </a>
+        {% endif %}
         {% if archivos %}
         <a href="{{ url_for('main.descargar_todos_archivos') }}" class="btn btn-primary">
             &#128230; Descargar Todo (ZIP)
         </a>
         {% endif %}
+        <button type="button" class="btn btn-danger btn-sm" onclick="abrirModalReset()" title="Resetear Extractor (Dev)">
+            &#128163; Reset Total
+        </button>
     </div>
 </div>
 
@@ -72,6 +80,7 @@
                     <thead>
                         <tr>
                             <th>Nombre</th>
+                            <th>Vigencia</th>
                             <th>Cuenta Origen</th>
                             <th>Asunto</th>
                             <th>Fecha</th>
@@ -88,6 +97,22 @@
                                     {{ archivo.nombre_archivo[:35] }}{% if archivo.nombre_archivo|length > 35 %}...{% endif %}
                                 </a>
                             </td>
+                            <td class="vigencia-cell">
+                                {% if archivo.tiene_vigencia %}
+                                    {% if archivo.vigencia_vencida %}
+                                    <span class="vigencia-icon vigencia-vencida" title="Vencida">&#10060;</span>
+                                    <span class="vigencia-dias vencida">{{ archivo.vigencia_dias|abs }}d</span>
+                                    {% elif archivo.vigencia_dias <= 30 %}
+                                    <span class="vigencia-icon vigencia-pronto" title="Vence pronto">&#9888;</span>
+                                    <span class="vigencia-dias pronto">{{ archivo.vigencia_dias }}d</span>
+                                    {% else %}
+                                    <span class="vigencia-icon vigencia-ok" title="Vigente">&#10004;</span>
+                                    <span class="vigencia-dias ok">{{ archivo.vigencia_dias }}d</span>
+                                    {% endif %}
+                                {% else %}
+                                <span class="vigencia-sin-datos">-</span>
+                                {% endif %}
+                            </td>
                             <td>
                                 <small class="cuenta-origen">{{ archivo.cuenta_origen or '-' }}</small>
                             </td>
@@ -95,6 +120,11 @@
                             <td>{{ archivo.fecha_correo.strftime('%d/%m/%Y') if archivo.fecha_correo else '-' }}</td>
                             <td>{{ "%.1f"|format((archivo.tamano_bytes or 0) / 1024) }} KB</td>
                             <td class="actions-cell">
+                                <button type="button" class="btn btn-sm btn-warning"
+                                        onclick="abrirModalCorreccion({{ archivo.id }}, '{{ archivo.nombre_archivo|e }}', {{ archivo.compania.id if archivo.compania else 'null' }}, '{{ archivo.compania.nombre|e if archivo.compania else '' }}')"
+                                        title="Corregir compania">
+                                    &#9888;
+                                </button>
                                 <a href="{{ url_for('main.descargar_archivo', archivo_id=archivo.id) }}" class="btn btn-sm btn-outline" title="Descargar">
                                     &#128229;
                                 </a>
@@ -128,6 +158,7 @@
                     <thead>
                         <tr>
                             <th>Nombre</th>
+                            <th>Vigencia</th>
                             <th>Remitente</th>
                             <th>Asunto</th>
                             <th>Fecha</th>
@@ -144,11 +175,32 @@
                                     {{ archivo.nombre_archivo[:35] }}{% if archivo.nombre_archivo|length > 35 %}...{% endif %}
                                 </a>
                             </td>
+                            <td class="vigencia-cell">
+                                {% if archivo.tiene_vigencia %}
+                                    {% if archivo.vigencia_vencida %}
+                                    <span class="vigencia-icon vigencia-vencida" title="Vencida">&#10060;</span>
+                                    <span class="vigencia-dias vencida">{{ archivo.vigencia_dias|abs }}d</span>
+                                    {% elif archivo.vigencia_dias <= 30 %}
+                                    <span class="vigencia-icon vigencia-pronto" title="Vence pronto">&#9888;</span>
+                                    <span class="vigencia-dias pronto">{{ archivo.vigencia_dias }}d</span>
+                                    {% else %}
+                                    <span class="vigencia-icon vigencia-ok" title="Vigente">&#10004;</span>
+                                    <span class="vigencia-dias ok">{{ archivo.vigencia_dias }}d</span>
+                                    {% endif %}
+                                {% else %}
+                                <span class="vigencia-sin-datos">-</span>
+                                {% endif %}
+                            </td>
                             <td>{{ (archivo.remitente or 'Desconocido')[:25] }}</td>
                             <td>{{ (archivo.asunto or '-')[:30] }}{% if archivo.asunto and archivo.asunto|length > 30 %}...{% endif %}</td>
                             <td>{{ archivo.fecha_correo.strftime('%d/%m/%Y') if archivo.fecha_correo else '-' }}</td>
                             <td>{{ "%.1f"|format((archivo.tamano_bytes or 0) / 1024) }} KB</td>
                             <td class="actions-cell">
+                                <button type="button" class="btn btn-sm btn-warning"
+                                        onclick="abrirModalCorreccion({{ archivo.id }}, '{{ archivo.nombre_archivo|e }}', null, 'Sin compania')"
+                                        title="Asignar compania">
+                                    &#9888;
+                                </button>
                                 <a href="{{ url_for('main.descargar_archivo', archivo_id=archivo.id) }}" class="btn btn-sm btn-outline" title="Descargar">
                                     &#128229;
                                 </a>
@@ -179,6 +231,7 @@
                 <thead>
                     <tr>
                         <th>Nombre</th>
+                        <th>Vigencia</th>
                         <th>Compañía</th>
                         <th>Cuenta Origen</th>
                         <th>Fecha Correo</th>
@@ -195,6 +248,22 @@
                                 {{ archivo.nombre_archivo[:40] }}{% if archivo.nombre_archivo|length > 40 %}...{% endif %}
                             </a>
                         </td>
+                        <td class="vigencia-cell">
+                            {% if archivo.tiene_vigencia %}
+                                {% if archivo.vigencia_vencida %}
+                                <span class="vigencia-icon vigencia-vencida" title="Vencida">&#10060;</span>
+                                <span class="vigencia-dias vencida">{{ archivo.vigencia_dias|abs }}d</span>
+                                {% elif archivo.vigencia_dias <= 30 %}
+                                <span class="vigencia-icon vigencia-pronto" title="Vence pronto">&#9888;</span>
+                                <span class="vigencia-dias pronto">{{ archivo.vigencia_dias }}d</span>
+                                {% else %}
+                                <span class="vigencia-icon vigencia-ok" title="Vigente">&#10004;</span>
+                                <span class="vigencia-dias ok">{{ archivo.vigencia_dias }}d</span>
+                                {% endif %}
+                            {% else %}
+                            <span class="vigencia-sin-datos">-</span>
+                            {% endif %}
+                        </td>
                         <td>
                             {% if archivo.compania %}
                             <span class="badge badge-primary">{{ archivo.compania.nombre }}</span>
@@ -206,6 +275,11 @@
                         <td>{{ archivo.fecha_correo.strftime('%d/%m/%Y') if archivo.fecha_correo else '-' }}</td>
                         <td>{{ "%.2f"|format((archivo.tamano_bytes or 0) / 1024) }} KB</td>
                         <td class="actions-cell">
+                            <button type="button" class="btn btn-sm btn-warning"
+                                    onclick="abrirModalCorreccion({{ archivo.id }}, '{{ archivo.nombre_archivo|e }}', {{ archivo.compania.id if archivo.compania else 'null' }}, '{{ archivo.compania.nombre|e if archivo.compania else 'Sin compania' }}')"
+                                    title="Corregir compania">
+                                &#9888;
+                            </button>
                             <a href="{{ url_for('main.descargar_archivo', archivo_id=archivo.id) }}" class="btn btn-sm btn-outline" title="Descargar">
                                 &#128229;
                             </a>
@@ -263,11 +337,52 @@
                             Confianza: <span id="confianza-valor">--</span>
                         </div>
                     </div>
-                    <!-- Formulario crear cliente -->
-                    <div class="datos-seccion">
+                    <!-- Alerta de cliente existente detectado -->
+                    <div class="datos-seccion cliente-existente-seccion" id="cliente-existente-alert" style="display: none;">
+                        <h4>&#9888; Cliente Existente Detectado</h4>
+                        <div class="cliente-existente-info">
+                            <div class="dato-item">
+                                <span class="dato-label">Nombre:</span>
+                                <span class="dato-valor" id="cliente-existente-nombre"></span>
+                            </div>
+                            <div class="dato-item">
+                                <span class="dato-label">Documento:</span>
+                                <span class="dato-valor" id="cliente-existente-doc"></span>
+                            </div>
+                            <div class="dato-item">
+                                <span class="dato-label">Telefono:</span>
+                                <span class="dato-valor" id="cliente-existente-tel"></span>
+                            </div>
+                            <div class="dato-item">
+                                <span class="dato-label">Coincidencia:</span>
+                                <span class="dato-valor" id="cliente-existente-match"></span>
+                            </div>
+                        </div>
+                        <div class="cliente-existente-actions">
+                            <a href="#" id="ver-cliente-existente-link" class="btn btn-primary btn-sm">
+                                Ver Cliente
+                            </a>
+                            <button type="button" class="btn btn-success btn-sm" id="btn-vincular-existente" onclick="vincularPolizaAClienteExistente()">
+                                Vincular Poliza a Este Cliente
+                            </button>
+                            <button type="button" class="btn btn-outline btn-sm" onclick="mostrarFormularioNuevoCliente()">
+                                Crear Cliente Nuevo
+                            </button>
+                        </div>
+                        <!-- Mensaje de vinculacion exitosa -->
+                        <div id="vinculacion-exito" class="exito-state" style="display: none;">
+                            <span class="exito-icon">&#10004;</span>
+                            <p>Poliza vinculada al cliente exitosamente</p>
+                            <a href="#" id="ver-cliente-vinculado-link" class="btn btn-outline btn-sm">Ver Cliente</a>
+                        </div>
+                    </div>
+
+                    <!-- Formulario crear cliente (oculto si hay cliente existente) -->
+                    <div class="datos-seccion" id="form-crear-wrapper">
                         <h4>Crear Cliente y Poliza</h4>
                         <form id="form-crear-cliente">
                             <input type="hidden" id="archivo-id-input" name="archivo_id" value="">
+                            <input type="hidden" id="cliente-existente-id-input" name="cliente_existente_id" value="">
                             <div class="form-group">
                                 <label for="cliente-nombre">Nombre *</label>
                                 <input type="text" id="cliente-nombre" name="nombre" class="form-control" required>
@@ -306,6 +421,37 @@
                     </details>
                 </div>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Correccion de Compania -->
+<div id="modal-correccion" class="modal-correccion" onclick="cerrarModalCorreccion(event)">
+    <div class="modal-correccion-content" onclick="event.stopPropagation()">
+        <div class="modal-correccion-header">
+            <h3>Corregir Compania</h3>
+            <button type="button" class="btn-close" onclick="cerrarModalCorreccion()">&times;</button>
+        </div>
+        <div class="modal-correccion-body">
+            <p class="archivo-info">
+                <strong>Archivo:</strong> <span id="correccion-archivo-nombre"></span>
+            </p>
+            <p class="compania-actual">
+                <strong>Compania actual:</strong> <span id="correccion-compania-actual"></span>
+            </p>
+            <div class="form-group">
+                <label for="select-nueva-compania">Seleccionar compania correcta:</label>
+                <select id="select-nueva-compania" class="form-control">
+                    <option value="">-- Seleccionar compania --</option>
+                    {% for compania in companias %}
+                    <option value="{{ compania.id }}">{{ compania.nombre }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="modal-correccion-footer">
+            <button type="button" class="btn btn-outline" onclick="cerrarModalCorreccion()">Cancelar</button>
+            <button type="button" class="btn btn-primary" onclick="guardarCorreccion()">Guardar Correccion</button>
         </div>
     </div>
 </div>
@@ -683,6 +829,41 @@
     color: #721c24;
 }
 
+/* Estilos para alerta de cliente existente */
+.cliente-existente-seccion {
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+}
+
+.cliente-existente-seccion h4 {
+    color: #856404;
+}
+
+.cliente-existente-info {
+    margin-bottom: 1rem;
+}
+
+.cliente-existente-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.cliente-existente-actions .btn {
+    flex: 1;
+    min-width: 120px;
+}
+
+.btn-success {
+    background: #28a745;
+    color: white;
+    border: none;
+}
+
+.btn-success:hover {
+    background: #218838;
+}
+
 .loading-state, .error-state, .exito-state {
     text-align: center;
     padding: 2rem;
@@ -837,6 +1018,149 @@
         flex: 0 0 60%;
     }
 }
+
+/* Modal de Correccion de Compania */
+.modal-correccion {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 10000;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+}
+
+.modal-correccion.active {
+    display: flex;
+}
+
+.modal-correccion-content {
+    background: white;
+    border-radius: var(--radius);
+    width: 100%;
+    max-width: 500px;
+    box-shadow: 0 10px 50px rgba(0, 0, 0, 0.3);
+}
+
+.modal-correccion-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--light);
+    border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.modal-correccion-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    color: var(--dark);
+}
+
+.modal-correccion-body {
+    padding: 1.5rem;
+}
+
+.modal-correccion-body .archivo-info {
+    background: var(--light);
+    padding: 0.75rem;
+    border-radius: var(--radius-sm);
+    margin-bottom: 1rem;
+    word-break: break-word;
+}
+
+.modal-correccion-body .compania-actual {
+    margin-bottom: 1.5rem;
+    color: var(--gray-dark);
+}
+
+.modal-correccion-body .form-group {
+    margin-bottom: 1rem;
+}
+
+.modal-correccion-body .form-group label {
+    display: block;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+}
+
+.modal-correccion-body .form-control {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 1rem;
+}
+
+.modal-correccion-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    padding: 1rem 1.5rem;
+    border-top: 1px solid var(--border);
+    background: var(--light);
+    border-radius: 0 0 var(--radius) var(--radius);
+}
+
+.btn-warning {
+    background: #f59e0b;
+    color: white;
+    border: none;
+}
+
+.btn-warning:hover {
+    background: #d97706;
+}
+
+/* Indicadores de Vigencia */
+.vigencia-cell {
+    white-space: nowrap;
+    text-align: center;
+}
+
+.vigencia-icon {
+    font-size: 1rem;
+    margin-right: 0.25rem;
+}
+
+.vigencia-ok {
+    color: #10b981;
+}
+
+.vigencia-pronto {
+    color: #f59e0b;
+}
+
+.vigencia-vencida {
+    color: #ef4444;
+}
+
+.vigencia-dias {
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.vigencia-dias.ok {
+    color: #059669;
+}
+
+.vigencia-dias.pronto {
+    color: #d97706;
+}
+
+.vigencia-dias.vencida {
+    color: #dc2626;
+}
+
+.vigencia-sin-datos {
+    color: var(--gray);
+    font-size: 0.85rem;
+}
 </style>
 {% endblock %}
 
@@ -902,13 +1226,21 @@ async function abrirPdfViewer(url, nombreArchivo, archivoId) {
     await cargarDatosExtraidos(archivoId);
 }
 
+// Variable global para cliente existente
+let clienteExistenteActual = null;
+
 function resetearPanelDatos() {
     document.getElementById('loading-datos').style.display = 'block';
     document.getElementById('error-datos').style.display = 'none';
     document.getElementById('datos-extraidos').style.display = 'none';
     document.getElementById('exito-mensaje').style.display = 'none';
+    document.getElementById('cliente-existente-alert').style.display = 'none';
+    document.getElementById('vinculacion-exito').style.display = 'none';
+    document.getElementById('form-crear-wrapper').style.display = 'block';
     document.getElementById('form-crear-cliente').style.display = 'block';
     document.getElementById('form-crear-cliente').reset();
+    document.getElementById('cliente-existente-id-input').value = '';
+    clienteExistenteActual = null;
 }
 
 async function cargarDatosExtraidos(archivoId) {
@@ -924,6 +1256,15 @@ async function cargarDatosExtraidos(archivoId) {
             preRellenarFormulario(data.datos);
             document.getElementById('json-completo').textContent = JSON.stringify(data.datos, null, 2);
             document.getElementById('datos-extraidos').style.display = 'block';
+
+            // Verificar si hay cliente existente detectado
+            if (data.datos.cliente_existente) {
+                mostrarClienteExistente(data.datos.cliente_existente);
+            } else {
+                // No hay cliente existente, mostrar formulario normal
+                document.getElementById('cliente-existente-alert').style.display = 'none';
+                document.getElementById('form-crear-wrapper').style.display = 'block';
+            }
         } else {
             document.getElementById('error-mensaje').textContent = data.error || 'Error al extraer datos';
             document.getElementById('error-datos').style.display = 'block';
@@ -933,6 +1274,84 @@ async function cargarDatosExtraidos(archivoId) {
         document.getElementById('loading-datos').style.display = 'none';
         document.getElementById('error-mensaje').textContent = 'Error de conexion';
         document.getElementById('error-datos').style.display = 'block';
+    }
+}
+
+function mostrarClienteExistente(cliente) {
+    clienteExistenteActual = cliente;
+
+    // Llenar datos del cliente existente
+    document.getElementById('cliente-existente-nombre').textContent = cliente.nombre_completo || '-';
+    document.getElementById('cliente-existente-doc').textContent = cliente.documento || '-';
+    document.getElementById('cliente-existente-tel').textContent = cliente.telefono || '-';
+
+    // Mostrar tipo de coincidencia
+    let matchTexto = '';
+    if (cliente.match_tipo === 'documento') {
+        matchTexto = 'Documento exacto (100%)';
+    } else if (cliente.match_tipo === 'nombre_fuzzy') {
+        const porcentaje = Math.round((cliente.match_confianza || 0) * 100);
+        matchTexto = `Nombre similar (${porcentaje}%)`;
+    }
+    document.getElementById('cliente-existente-match').textContent = matchTexto;
+
+    // Configurar enlace a cliente existente
+    document.getElementById('ver-cliente-existente-link').href = `/distribucion/clientes/${cliente.id}`;
+
+    // Guardar ID para vinculacion
+    document.getElementById('cliente-existente-id-input').value = cliente.id;
+
+    // Mostrar alerta y ocultar formulario de crear
+    document.getElementById('cliente-existente-alert').style.display = 'block';
+    document.getElementById('form-crear-wrapper').style.display = 'none';
+}
+
+function mostrarFormularioNuevoCliente() {
+    // Ocultar alerta de cliente existente y mostrar formulario
+    document.getElementById('cliente-existente-alert').style.display = 'none';
+    document.getElementById('form-crear-wrapper').style.display = 'block';
+    document.getElementById('cliente-existente-id-input').value = '';
+}
+
+async function vincularPolizaAClienteExistente() {
+    if (!clienteExistenteActual || !archivoIdActual) {
+        alert('Error: No hay cliente o archivo seleccionado');
+        return;
+    }
+
+    const btn = document.getElementById('btn-vincular-existente');
+    btn.disabled = true;
+    btn.textContent = 'Vinculando...';
+
+    try {
+        const response = await fetch(`/archivos/vincular-a-cliente/${archivoIdActual}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            },
+            body: JSON.stringify({
+                cliente_id: clienteExistenteActual.id
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.exito) {
+            // Ocultar botones y mostrar exito
+            document.querySelector('.cliente-existente-actions').style.display = 'none';
+            document.getElementById('ver-cliente-vinculado-link').href = `/distribucion/clientes/${clienteExistenteActual.id}`;
+            document.getElementById('vinculacion-exito').style.display = 'block';
+        } else {
+            alert(data.error || 'Error al vincular poliza');
+            btn.disabled = false;
+            btn.textContent = 'Vincular Poliza a Este Cliente';
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error de conexion');
+        btn.disabled = false;
+        btn.textContent = 'Vincular Poliza a Este Cliente';
     }
 }
 
@@ -1065,7 +1484,158 @@ document.addEventListener('keydown', function(e) {
         if (modal && modal.classList.contains('active')) {
             cerrarPdfViewer();
         }
+        const modalCorreccion = document.getElementById('modal-correccion');
+        if (modalCorreccion && modalCorreccion.classList.contains('active')) {
+            cerrarModalCorreccion();
+        }
     }
 });
+
+// ============================================
+// FUNCIONES PARA CORRECCION DE COMPANIA
+// ============================================
+
+let archivoCorreccionId = null;
+let companiaActualId = null;
+
+function abrirModalCorreccion(archivoId, nombreArchivo, companiaId, companiaNombre) {
+    archivoCorreccionId = archivoId;
+    companiaActualId = companiaId;
+
+    document.getElementById('correccion-archivo-nombre').textContent = nombreArchivo;
+    document.getElementById('correccion-compania-actual').textContent = companiaNombre || 'Sin compania';
+
+    // Pre-seleccionar la compania actual en el dropdown
+    const select = document.getElementById('select-nueva-compania');
+    select.value = companiaId || '';
+
+    document.getElementById('modal-correccion').classList.add('active');
+    document.body.style.overflow = 'hidden';
+}
+
+function cerrarModalCorreccion(event) {
+    if (event && event.target !== document.getElementById('modal-correccion')) {
+        return;
+    }
+    document.getElementById('modal-correccion').classList.remove('active');
+    document.body.style.overflow = '';
+    archivoCorreccionId = null;
+    companiaActualId = null;
+}
+
+async function guardarCorreccion() {
+    const nuevaCompaniaId = document.getElementById('select-nueva-compania').value;
+
+    if (!nuevaCompaniaId) {
+        alert('Por favor selecciona una compania');
+        return;
+    }
+
+    if (parseInt(nuevaCompaniaId) === companiaActualId) {
+        alert('La compania seleccionada es la misma que la actual');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/archivo/${archivoCorreccionId}/compania`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            },
+            body: JSON.stringify({
+                compania_id: parseInt(nuevaCompaniaId),
+                es_correccion: true
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            alert('Compania corregida exitosamente. La pagina se recargara para mostrar los cambios.');
+            cerrarModalCorreccion();
+            window.location.reload();
+        } else {
+            alert(data.message || 'Error al guardar la correccion');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error de conexion al guardar la correccion');
+    }
+}
+
+// ============================================
+// FUNCIONES PARA RESET TOTAL (DESARROLLO)
+// ============================================
+
+function abrirModalReset() {
+    if (!confirm('ATENCION: Esta accion borrara TODOS los archivos, escaneos, clientes y polizas.\n\n¿Deseas continuar?')) {
+        return;
+    }
+
+    const confirmacion = prompt('Para confirmar, escribe BORRAR_TODO:');
+    if (confirmacion !== 'BORRAR_TODO') {
+        alert('Confirmacion incorrecta. Operacion cancelada.');
+        return;
+    }
+
+    ejecutarReset();
+}
+
+async function ejecutarReset() {
+    const btn = document.querySelector('.btn-danger');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Reseteando...';
+    }
+
+    try {
+        const response = await fetch('/api/extractor/reset-total', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            },
+            body: JSON.stringify({
+                confirmar: 'BORRAR_TODO'
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            let mensaje = 'RESET COMPLETADO\n\n';
+            mensaje += 'Tablas limpiadas:\n';
+            for (const tabla of data.resultados.tablas_limpiadas) {
+                mensaje += '  - ' + tabla + '\n';
+            }
+            mensaje += '\nArchivos eliminados: ' + data.resultados.archivos_eliminados;
+            mensaje += '\nDirectorios limpiados: ' + data.resultados.directorios_limpiados.join(', ');
+
+            if (data.resultados.errores && data.resultados.errores.length > 0) {
+                mensaje += '\n\nErrores:\n';
+                for (const error of data.resultados.errores) {
+                    mensaje += '  - ' + error + '\n';
+                }
+            }
+
+            alert(mensaje);
+            window.location.reload();
+        } else {
+            alert('Error: ' + (data.message || 'Error desconocido'));
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '&#128163; Reset Total';
+            }
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error de conexion durante el reset');
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '&#128163; Reset Total';
+        }
+    }
+}
 </script>
 {% endblock %}

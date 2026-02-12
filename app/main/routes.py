@@ -1422,6 +1422,136 @@ def crear_desde_pdf(archivo_id):
         return jsonify({'exito': False, 'error': str(e)}), 500
 
 
+@main_bp.route('/archivos/vincular-a-cliente/<int:archivo_id>', methods=['POST'])
+@login_required
+def vincular_a_cliente_existente(archivo_id):
+    """
+    Vincula un PDF a un cliente existente, creando la póliza correspondiente.
+
+    Este endpoint se usa cuando el sistema detecta que el PDF corresponde
+    a un cliente que ya existe en la base de datos.
+
+    Recibe JSON:
+    - cliente_id: ID del cliente existente
+
+    Acciones:
+    1. Verifica que el cliente existe y pertenece al usuario
+    2. Extrae datos del PDF
+    3. Crea una PolizaCliente vinculada al cliente existente
+    4. Actualiza el ArchivoDescargado
+    """
+    from app.extractor.pdf_parser import ExtractorDatosPoliza
+
+    # Verificar que el archivo pertenece al usuario
+    archivo = ArchivoDescargado.query.join(Escaneo).filter(
+        ArchivoDescargado.id == archivo_id,
+        Escaneo.usuario_id == current_user.id
+    ).first_or_404()
+
+    # Obtener cliente_id del JSON
+    data = request.get_json() or {}
+    cliente_id = data.get('cliente_id')
+
+    if not cliente_id:
+        return jsonify({'exito': False, 'error': 'Se requiere cliente_id'}), 400
+
+    # Verificar que el cliente existe y pertenece al usuario
+    cliente = Cliente.query.filter(
+        Cliente.id == cliente_id,
+        Cliente.usuario_id == current_user.id
+    ).first()
+
+    if not cliente:
+        return jsonify({'exito': False, 'error': 'Cliente no encontrado'}), 404
+
+    try:
+        # 1. Extraer datos del PDF
+        ruta_fisica = archivo.obtener_ruta_fisica()
+        datos_poliza = {}
+        confianza = 0.5
+
+        if os.path.exists(ruta_fisica):
+            try:
+                extractor = ExtractorDatosPoliza()
+                datos_extraidos = extractor.extraer_datos(ruta_fisica)
+                if datos_extraidos:
+                    datos_poliza = extractor.datos_para_poliza(datos_extraidos)
+                    confianza = datos_extraidos.get('confianza', 0.5)
+            except Exception as e:
+                logger.warning(f"Error extrayendo datos del PDF: {e}")
+
+        # 2. Verificar si ya existe una póliza para este archivo y cliente
+        poliza_existente = PolizaCliente.query.filter(
+            PolizaCliente.archivo_id == archivo.id,
+            PolizaCliente.cliente_id == cliente.id
+        ).first()
+
+        if poliza_existente:
+            return jsonify({
+                'exito': False,
+                'error': 'Ya existe una póliza vinculada a este archivo para este cliente'
+            }), 409
+
+        # 3. Crear póliza vinculada al cliente existente
+        poliza = PolizaCliente(
+            cliente_id=cliente.id,
+            archivo_id=archivo.id,
+            compania_id=archivo.compania_id,
+            numero_poliza=datos_poliza.get('numero_poliza'),
+            tipo_seguro=datos_poliza.get('tipo_seguro'),
+            fecha_vigencia_desde=datos_poliza.get('fecha_vigencia_desde'),
+            fecha_vigencia_hasta=datos_poliza.get('fecha_vigencia_hasta'),
+            prima_anual=datos_poliza.get('prima_anual'),
+            suma_asegurada=datos_poliza.get('suma_asegurada'),
+            deducible=datos_poliza.get('deducible'),
+            asegurado_nombre=cliente.nombre_completo,
+            asegurado_documento=cliente.documento_identidad,
+            asegurado_email=cliente.email,
+            vehiculo_marca=datos_poliza.get('vehiculo_marca'),
+            vehiculo_modelo=datos_poliza.get('vehiculo_modelo'),
+            vehiculo_anio=datos_poliza.get('vehiculo_anio'),
+            vehiculo_patente=datos_poliza.get('vehiculo_patente'),
+            vehiculo_chasis=datos_poliza.get('vehiculo_chasis'),
+            vehiculo_motor=datos_poliza.get('vehiculo_motor'),
+            inmueble_direccion=datos_poliza.get('inmueble_direccion'),
+            inmueble_tipo=datos_poliza.get('inmueble_tipo'),
+            confianza_extraccion=confianza,
+            fecha_extraccion=datetime.utcnow(),
+            estado_confirmacion='definitivo',
+            fecha_confirmacion=datetime.utcnow(),
+            confirmado_por='vinculacion_automatica'
+        )
+        db.session.add(poliza)
+
+        # 4. Marcar archivo como procesado
+        archivo.estado_confirmacion = 'definitivo'
+        archivo.fecha_confirmacion = datetime.utcnow()
+        archivo.confirmado_por = 'vinculacion_automatica'
+
+        db.session.commit()
+
+        # Log de actividad
+        LogActividad.registrar(
+            current_user.id,
+            'poliza_vinculada',
+            f'Póliza vinculada a cliente existente: {cliente.nombre_completo}',
+            request
+        )
+
+        return jsonify({
+            'exito': True,
+            'cliente_id': cliente.id,
+            'poliza_id': poliza.id,
+            'mensaje': f'Póliza vinculada exitosamente a {cliente.nombre_completo}'
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        traceback.print_exc()
+        return jsonify({'exito': False, 'error': str(e)}), 500
+
+
 # ============================================
 # REPASO DE CORRECCIONES DE COMPANIA
 # ============================================

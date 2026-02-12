@@ -2398,6 +2398,21 @@ def api_extraer_datos_pdf(archivo_id):
         # Quitar texto muestra del JSON (muy grande)
         datos.pop('texto_muestra', None)
 
+        # Incluir información de cliente existente si fue detectado al escanear
+        datos['cliente_existente'] = None
+        if archivo.cliente_existente_id:
+            cliente = Cliente.query.get(archivo.cliente_existente_id)
+            if cliente:
+                datos['cliente_existente'] = {
+                    'id': cliente.id,
+                    'nombre_completo': cliente.nombre_completo,
+                    'documento': cliente.documento_identidad,
+                    'telefono': cliente.telefono_whatsapp,
+                    'email': cliente.email,
+                    'match_tipo': archivo.cliente_match_tipo,
+                    'match_confianza': archivo.cliente_match_confianza
+                }
+
         return jsonify({
             'exito': True,
             'datos': datos,
