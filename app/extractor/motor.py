@@ -987,7 +987,21 @@ class MotorExtractorWeb:
             escaneo.fecha_fin = datetime.utcnow()
             escaneo.cuenta_actual = None
             self.estado_motor = self.ESTADO_COMPLETADO if not self.detener_solicitado else self.ESTADO_DETENIDO
-            db_session.commit()
+
+            # Commit con retry para evitar "database is locked" después de consolidación pesada
+            for intento in range(5):
+                try:
+                    db_session.commit()
+                    break
+                except Exception as e_commit:
+                    if 'database is locked' in str(e_commit).lower() and intento < 4:
+                        import time
+                        delay = (2 ** intento) * 0.5  # 0.5s, 1s, 2s, 4s
+                        self.registrar(f"BD ocupada, reintentando en {delay}s (intento {intento+1}/5)",
+                                       nivel='warning', categoria='sistema')
+                        time.sleep(delay)
+                    else:
+                        raise
 
             self.registrar(f"Escaneo finalizado: {total_correos} correos, {total_pdfs} PDFs",
                            nivel='success', categoria='sistema',
