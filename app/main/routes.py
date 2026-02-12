@@ -2,15 +2,19 @@
 Rutas principales de la aplicación
 """
 
-from flask import Blueprint, render_template, redirect, url_for, send_file, abort, current_app, request, jsonify, flash
-from flask_login import login_required, current_user
-from app.models import Escaneo, ArchivoDescargado, CuentaGmail, Compania, Cliente, PolizaCliente
-from app import db
-from datetime import datetime, timedelta
-from sqlalchemy import func
+import logging
 import os
 import zipfile
 import io
+from flask import Blueprint, render_template, redirect, url_for, send_file, abort, current_app, request, jsonify, flash, make_response
+from flask_login import login_required, current_user
+from app.models import (Escaneo, ArchivoDescargado, CuentaGmail, Compania, Cliente,
+                        PolizaCliente, LogEscaneo, HistorialEscaneoCarpeta)
+from app import db
+from datetime import datetime, timedelta
+from sqlalchemy import func
+
+logger = logging.getLogger('app.main.routes')
 
 main_bp = Blueprint('main', __name__)
 
@@ -96,6 +100,9 @@ def archivos():
     if current_user.debe_cambiar_contrasena:
         return redirect(url_for('auth.cambiar_contrasena_obligatorio'))
 
+    # Forzar lectura fresca de la BD (importante después de escaneos)
+    db.session.expire_all()
+
     # Parámetros de filtro
     compania_id = request.args.get('compania', type=int)
     vista = request.args.get('vista', 'agrupada')  # 'agrupada' o 'lista'
@@ -111,12 +118,28 @@ def archivos():
 
     archivos = query.order_by(ArchivoDescargado.fecha_descarga.desc()).all()
 
-    # Verificar existencia física de cada archivo y contar huérfanos
+    # Verificar existencia física de cada archivo y agregar info de vigencia
     huerfanos_count = 0
+    from datetime import date
+    hoy = date.today()
+
     for archivo in archivos:
-        archivo.archivo_existe = os.path.exists(archivo.ruta_archivo)
+        ruta_fisica = archivo.obtener_ruta_fisica()
+        archivo.archivo_existe = os.path.exists(ruta_fisica)
         if not archivo.archivo_existe:
             huerfanos_count += 1
+
+        # Obtener póliza asociada y calcular vigencia
+        poliza = PolizaCliente.query.filter_by(archivo_id=archivo.id).first()
+        if poliza and poliza.fecha_vigencia_hasta:
+            dias_restantes = (poliza.fecha_vigencia_hasta - hoy).days
+            archivo.vigencia_dias = dias_restantes
+            archivo.vigencia_vencida = dias_restantes < 0
+            archivo.tiene_vigencia = True
+        else:
+            archivo.vigencia_dias = None
+            archivo.vigencia_vencida = None
+            archivo.tiene_vigencia = False
 
     # Calcular tamaño total (solo de archivos que existen)
     tamano_total = sum(a.tamano_bytes or 0 for a in archivos if a.archivo_existe)
@@ -149,7 +172,13 @@ def archivos():
         key=lambda x: x['compania'].nombre.lower()
     )
 
-    return render_template('main/archivos.html',
+    # Contar archivos con correcciones pendientes
+    correcciones_pendientes = ArchivoDescargado.query.join(Escaneo).filter(
+        Escaneo.usuario_id == current_user.id,
+        ArchivoDescargado.correccion_compania == True
+    ).count()
+
+    response = make_response(render_template('main/archivos.html',
                           archivos=archivos,
                           tamano_total=tamano_total,
                           companias=companias_con_archivos,
@@ -157,7 +186,13 @@ def archivos():
                           archivos_sin_compania=archivos_sin_compania,
                           compania_seleccionada=compania_id,
                           vista=vista,
-                          huerfanos_count=huerfanos_count)
+                          huerfanos_count=huerfanos_count,
+                          correcciones_pendientes=correcciones_pendientes))
+    # Headers anti-caché para que siempre muestre datos frescos
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 @main_bp.route('/archivos/descargar/<int:archivo_id>')
@@ -171,9 +206,12 @@ def descargar_archivo(archivo_id):
         Escaneo.usuario_id == current_user.id
     ).first_or_404()
 
-    if os.path.exists(archivo.ruta_archivo):
+    # Usar método que soporta repositorio y archivos legacy
+    ruta_fisica = archivo.obtener_ruta_fisica()
+
+    if os.path.exists(ruta_fisica):
         return send_file(
-            archivo.ruta_archivo,
+            ruta_fisica,
             as_attachment=True,
             download_name=archivo.nombre_archivo
         )
@@ -193,9 +231,12 @@ def ver_archivo(archivo_id):
         Escaneo.usuario_id == current_user.id
     ).first_or_404()
 
-    if os.path.exists(archivo.ruta_archivo):
+    # Usar método que soporta repositorio y archivos legacy
+    ruta_fisica = archivo.obtener_ruta_fisica()
+
+    if os.path.exists(ruta_fisica):
         return send_file(
-            archivo.ruta_archivo,
+            ruta_fisica,
             mimetype='application/pdf',
             as_attachment=False
         )
@@ -219,8 +260,9 @@ def descargar_todos_archivos():
     memoria = io.BytesIO()
     with zipfile.ZipFile(memoria, 'w', zipfile.ZIP_DEFLATED) as zf:
         for archivo in archivos:
-            if os.path.exists(archivo.ruta_archivo):
-                zf.write(archivo.ruta_archivo, archivo.nombre_archivo)
+            ruta_fisica = archivo.obtener_ruta_fisica()
+            if os.path.exists(ruta_fisica):
+                zf.write(ruta_fisica, archivo.nombre_archivo)
 
     memoria.seek(0)
 
@@ -248,16 +290,26 @@ def eliminar_archivo(archivo_id):
     ).first_or_404()
 
     # Verificar si hay polizas asociadas y crear backup si es necesario
+    ruta_fisica = archivo.obtener_ruta_fisica()
     polizas_asociadas = PolizaCliente.query.filter_by(archivo_id=archivo.id).all()
     backups_creados = 0
     for poliza in polizas_asociadas:
         if not poliza.ruta_pdf_backup:
-            if crear_backup_poliza(poliza, archivo.ruta_archivo):
+            if crear_backup_poliza(poliza, ruta_fisica):
                 backups_creados += 1
 
-    # Eliminar archivo físico
-    if os.path.exists(archivo.ruta_archivo):
-        os.remove(archivo.ruta_archivo)
+    # Manejar repositorio si aplica
+    if archivo.archivo_repo:
+        archivo.archivo_repo.decrementar_referencias()
+        # Solo eliminar archivo físico si no hay más referencias
+        if archivo.archivo_repo.cantidad_referencias <= 0:
+            if os.path.exists(ruta_fisica):
+                os.remove(ruta_fisica)
+            db.session.delete(archivo.archivo_repo)
+    else:
+        # Archivo legacy - eliminar directamente
+        if os.path.exists(ruta_fisica):
+            os.remove(ruta_fisica)
 
     # Eliminar registros de análisis relacionados primero
     RegistroAnalisisPDF.query.filter_by(archivo_id=archivo.id).delete()
@@ -298,16 +350,24 @@ def eliminar_archivos_multiple():
             ).first()
 
             if archivo:
+                ruta_fisica = archivo.obtener_ruta_fisica()
                 # Verificar si hay polizas asociadas y crear backup
                 polizas_asociadas = PolizaCliente.query.filter_by(archivo_id=archivo.id).all()
                 for poliza in polizas_asociadas:
                     if not poliza.ruta_pdf_backup:
-                        if crear_backup_poliza(poliza, archivo.ruta_archivo):
+                        if crear_backup_poliza(poliza, ruta_fisica):
                             backups_creados += 1
 
-                # Eliminar archivo físico
-                if os.path.exists(archivo.ruta_archivo):
-                    os.remove(archivo.ruta_archivo)
+                # Manejar repositorio si aplica
+                if archivo.archivo_repo:
+                    archivo.archivo_repo.decrementar_referencias()
+                    if archivo.archivo_repo.cantidad_referencias <= 0:
+                        if os.path.exists(ruta_fisica):
+                            os.remove(ruta_fisica)
+                        db.session.delete(archivo.archivo_repo)
+                else:
+                    if os.path.exists(ruta_fisica):
+                        os.remove(ruta_fisica)
                 # Eliminar registros de análisis relacionados primero
                 RegistroAnalisisPDF.query.filter_by(archivo_id=archivo.id).delete()
                 # Eliminar registro
@@ -339,7 +399,8 @@ def limpiar_archivos_huerfanos():
 
     huerfanos = []
     for archivo in archivos:
-        if not os.path.exists(archivo.ruta_archivo):
+        ruta_fisica = archivo.obtener_ruta_fisica()
+        if not os.path.exists(ruta_fisica):
             huerfanos.append(archivo)
 
     if not huerfanos:
@@ -400,7 +461,7 @@ def api_datos_archivo(archivo_id):
 @main_bp.route('/api/archivo/<int:archivo_id>/compania', methods=['POST'])
 @login_required
 def api_cambiar_compania_archivo(archivo_id):
-    """Cambia la compañía asignada a un archivo."""
+    """Cambia la compañía asignada a un archivo y registra la corrección."""
     archivo = ArchivoDescargado.query.join(Escaneo).filter(
         ArchivoDescargado.id == archivo_id,
         Escaneo.usuario_id == current_user.id
@@ -408,11 +469,19 @@ def api_cambiar_compania_archivo(archivo_id):
 
     data = request.get_json()
     compania_id = data.get('compania_id')
+    es_correccion = data.get('es_correccion', False)  # Flag para marcar como corrección manual
 
     if compania_id:
         compania = Compania.query.get(compania_id)
         if not compania:
             return jsonify({'success': False, 'message': 'Compañía no encontrada'}), 404
+
+    # Si es una corrección, guardar la compañía original
+    if es_correccion and archivo.compania_id != compania_id:
+        if not archivo.correccion_compania:  # Solo guardar original la primera vez
+            archivo.compania_id_original = archivo.compania_id
+        archivo.correccion_compania = True
+        archivo.fecha_correccion = datetime.utcnow()
 
     # Actualizar archivo
     archivo.compania_id = compania_id if compania_id else None
@@ -427,7 +496,8 @@ def api_cambiar_compania_archivo(archivo_id):
 
     return jsonify({
         'success': True,
-        'message': f"Compañía actualizada a '{compania.nombre}'" if compania_id else "Compañía removida"
+        'message': f"Compañía actualizada a '{compania.nombre}'" if compania_id else "Compañía removida",
+        'correccion_registrada': es_correccion
     })
 
 
@@ -456,7 +526,7 @@ def api_asignar_cliente_archivo(archivo_id):
     if not cliente_id:
         return jsonify({'success': False, 'message': 'ID de cliente requerido'}), 400
 
-    cliente = Cliente.query.filter_by(id=cliente_id, usuario_id=current_user.id).first()
+    cliente = Cliente.query.filter_by(id=cliente_id, activo=True).first()
     if not cliente:
         return jsonify({'success': False, 'message': 'Cliente no encontrado'}), 404
 
@@ -610,34 +680,39 @@ def api_buscar_clientes():
 @main_bp.route('/api/clientes', methods=['POST'])
 @login_required
 def api_crear_cliente():
-    """Crea un nuevo cliente."""
+    """Crea un nuevo cliente (unifica si existe con mismo documento)."""
     data = request.get_json()
 
     nombre = data.get('nombre', '').strip()
     apellido = data.get('apellido', '').strip()
+    documento = data.get('dni_cuit', '').strip() or data.get('documento_identidad', '').strip() or None
+    email = data.get('email', '').strip() or None
+    telefono = data.get('telefono', '').strip() or None
 
     if not nombre:
         return jsonify({'success': False, 'message': 'Nombre requerido'}), 400
 
-    nuevo = Cliente(
+    # Usar método que unifica por documento
+    cliente, es_nuevo, mensaje = Cliente.obtener_o_crear(
         usuario_id=current_user.id,
         nombre=nombre,
         apellido=apellido,
-        dni_cuit=data.get('dni_cuit', '').strip() or None,
-        email=data.get('email', '').strip() or None,
-        telefono_whatsapp=data.get('telefono', '').strip() or None
+        documento_identidad=documento,
+        email=email,
+        telefono_whatsapp=telefono,
+        actualizar_existente=True
     )
-    db.session.add(nuevo)
     db.session.commit()
 
     return jsonify({
         'success': True,
-        'message': f"Cliente '{nombre} {apellido}' creado",
+        'es_nuevo': es_nuevo,
+        'message': mensaje if not es_nuevo else f"Cliente '{nombre} {apellido}' creado",
         'cliente': {
-            'id': nuevo.id,
-            'nombre': nuevo.nombre,
-            'apellido': nuevo.apellido,
-            'display': f"{nuevo.nombre or ''} {nuevo.apellido or ''}"
+            'id': cliente.id,
+            'nombre': cliente.nombre,
+            'apellido': cliente.apellido,
+            'display': cliente.nombre_completo
         }
     })
 
@@ -661,14 +736,15 @@ def api_datos_pdf(archivo_id):
     poliza = PolizaCliente.query.filter_by(archivo_id=archivo_id).first()
 
     # Extraer datos frescos del PDF si el archivo existe
+    ruta_fisica = archivo.obtener_ruta_fisica()
     datos_extraidos = {}
     confianza_extraccion = 0
-    if os.path.exists(archivo.ruta_archivo):
+    if os.path.exists(ruta_fisica):
         try:
-            datos_extraidos = extraer_datos_poliza(archivo.ruta_archivo) or {}
+            datos_extraidos = extraer_datos_poliza(ruta_fisica) or {}
             confianza_extraccion = datos_extraidos.get('confianza_extraccion', 0.5)
         except Exception as e:
-            print(f"Error extrayendo datos del PDF: {e}")
+            logger.warning(f"Error extrayendo datos del PDF: {e}")
 
     # Definir campos a mostrar organizados por categoría
     campos_config = {
@@ -910,7 +986,8 @@ def api_reextraer_pdf(archivo_id):
         Escaneo.usuario_id == current_user.id
     ).first_or_404()
 
-    if not os.path.exists(archivo.ruta_archivo):
+    ruta_fisica = archivo.obtener_ruta_fisica()
+    if not os.path.exists(ruta_fisica):
         return jsonify({'success': False, 'message': 'Archivo PDF no encontrado'}), 404
 
     # Modos de extracción disponibles
@@ -933,7 +1010,7 @@ def api_reextraer_pdf(archivo_id):
 
     try:
         extractor = ExtractorDatosPoliza()
-        texto = extractor.extraer_texto_pdf(archivo.ruta_archivo)
+        texto = extractor.extraer_texto_pdf(ruta_fisica)
 
         if not texto:
             return jsonify({'success': False, 'message': 'No se pudo leer el PDF'}), 400
@@ -941,11 +1018,11 @@ def api_reextraer_pdf(archivo_id):
         # Aplicar extracción según el modo
         if modo == 'auto':
             compania = extractor.detectar_compania(texto)
-            datos = extractor.extraer_datos(archivo.ruta_archivo)
+            datos = extractor.extraer_datos(ruta_fisica)
             modo_usado = f"auto ({compania or 'genérico'})"
         elif modo == 'generico':
             # Solo usar patrones genéricos sin detección de compañía
-            datos = extractor.extraer_datos(archivo.ruta_archivo)
+            datos = extractor.extraer_datos(ruta_fisica)
             # Limpiar datos específicos de compañía
             datos['compania_detectada'] = None
             modo_usado = "genérico"
@@ -955,14 +1032,14 @@ def api_reextraer_pdf(archivo_id):
             if hasattr(extractor, metodo):
                 datos_especificos = getattr(extractor, metodo)(texto)
                 # Combinar con datos base
-                datos = extractor.extraer_datos(archivo.ruta_archivo)
+                datos = extractor.extraer_datos(ruta_fisica)
                 for campo, valor in datos_especificos.items():
                     if valor:
                         datos[campo] = valor
                 datos['compania_detectada'] = modo
                 modo_usado = modo.replace('_', ' ').title()
             else:
-                datos = extractor.extraer_datos(archivo.ruta_archivo)
+                datos = extractor.extraer_datos(ruta_fisica)
                 modo_usado = f"{modo} (no disponible, usando auto)"
         else:
             datos = extractor.extraer_datos(archivo.ruta_archivo)
@@ -1025,12 +1102,13 @@ def api_renombrar_archivo(archivo_id):
         Escaneo.usuario_id == current_user.id
     ).first_or_404()
 
-    if not os.path.exists(archivo.ruta_archivo):
+    ruta_fisica = archivo.obtener_ruta_fisica()
+    if not os.path.exists(ruta_fisica):
         return jsonify({'success': False, 'message': 'Archivo PDF no encontrado'}), 404
 
     try:
         # Extraer datos del PDF con patrones mejorados
-        datos = extraer_datos_poliza(archivo.ruta_archivo)
+        datos = extraer_datos_poliza(ruta_fisica)
 
         if not datos:
             return jsonify({'success': False, 'message': 'No se pudieron extraer datos del PDF'}), 400
@@ -1040,72 +1118,35 @@ def api_renombrar_archivo(archivo_id):
             return jsonify({'success': False, 'message': 'No se encontró nombre del asegurado'}), 400
 
         # ============================================================
-        # 1. CREAR O ACTUALIZAR CLIENTE
+        # 1. CREAR O ACTUALIZAR CLIENTE (con unificación por documento)
         # ============================================================
-        cliente = None
-        cliente_creado = False
         documento = datos.get('asegurado_documento', '').replace('-', '').replace(' ', '')
 
-        # Buscar cliente existente por documento
-        if documento:
-            cliente = Cliente.query.filter(
-                Cliente.usuario_id == current_user.id,
-                Cliente.documento_identidad == documento
-            ).first()
-
-        # Si no se encontró por documento, buscar por nombre similar
-        if not cliente and asegurado_nombre:
-            # Separar nombre y apellido
-            partes_nombre = asegurado_nombre.split(',')
-            if len(partes_nombre) >= 2:
-                apellido = partes_nombre[0].strip()
-                nombre = partes_nombre[1].strip()
-            else:
-                partes_nombre = asegurado_nombre.split()
-                apellido = partes_nombre[0] if partes_nombre else ''
-                nombre = ' '.join(partes_nombre[1:]) if len(partes_nombre) > 1 else ''
-
-            cliente = Cliente.query.filter(
-                Cliente.usuario_id == current_user.id,
-                Cliente.apellido.ilike(f'%{apellido}%'),
-                Cliente.nombre.ilike(f'%{nombre[:10]}%') if nombre else True
-            ).first()
-
-        # Si no existe, crear nuevo cliente
-        if not cliente:
-            partes_nombre = asegurado_nombre.split(',')
-            if len(partes_nombre) >= 2:
-                apellido = partes_nombre[0].strip()
-                nombre = partes_nombre[1].strip()
-            else:
-                partes_nombre = asegurado_nombre.split()
-                apellido = partes_nombre[0] if partes_nombre else asegurado_nombre
-                nombre = ' '.join(partes_nombre[1:]) if len(partes_nombre) > 1 else ''
-
-            telefono = datos.get('asegurado_telefono', '').strip()
-            # Si no hay teléfono, usar un placeholder
-            if not telefono:
-                telefono = '0000000000'
-
-            cliente = Cliente(
-                usuario_id=current_user.id,
-                nombre=nombre[:100] if nombre else apellido[:100],
-                apellido=apellido[:100] if nombre else None,
-                telefono_whatsapp=telefono[:20],
-                email=datos.get('asegurado_email', '')[:120] if datos.get('asegurado_email') else None,
-                documento_identidad=documento[:30] if documento else None,
-                notas=f"Dirección: {datos.get('asegurado_direccion', '')}"[:500] if datos.get('asegurado_direccion') else None,
-                fecha_registro=datetime.utcnow()
-            )
-            db.session.add(cliente)
-            db.session.flush()  # Para obtener el ID
-            cliente_creado = True
+        # Parsear nombre del asegurado
+        partes_nombre = asegurado_nombre.split(',')
+        if len(partes_nombre) >= 2:
+            apellido = partes_nombre[0].strip()
+            nombre = partes_nombre[1].strip()
         else:
-            # Actualizar datos del cliente existente si están vacíos
-            if not cliente.documento_identidad and documento:
-                cliente.documento_identidad = documento[:30]
-            if not cliente.email and datos.get('asegurado_email'):
-                cliente.email = datos['asegurado_email'][:120]
+            partes_nombre = asegurado_nombre.split()
+            apellido = partes_nombre[0] if partes_nombre else asegurado_nombre
+            nombre = ' '.join(partes_nombre[1:]) if len(partes_nombre) > 1 else ''
+
+        telefono = datos.get('asegurado_telefono', '').strip() or '0000000000'
+        notas = f"Dirección: {datos.get('asegurado_direccion', '')}" if datos.get('asegurado_direccion') else None
+
+        # Usar método unificado que busca por documento y crea si no existe
+        cliente, cliente_creado, _ = Cliente.obtener_o_crear(
+            usuario_id=current_user.id,
+            nombre=nombre[:100] if nombre else apellido[:100],
+            apellido=apellido[:100] if nombre else None,
+            telefono_whatsapp=telefono[:20],
+            email=datos.get('asegurado_email', '')[:120] if datos.get('asegurado_email') else None,
+            documento_identidad=documento[:30] if documento else None,
+            notas=notas[:500] if notas else None,
+            actualizar_existente=True
+        )
+        db.session.flush()  # Para obtener el ID si es nuevo
 
         # ============================================================
         # 2. CREAR O ACTUALIZAR PÓLIZA
@@ -1300,32 +1341,32 @@ def crear_desde_pdf(archivo_id):
         return jsonify({'exito': False, 'error': 'El teléfono es requerido'}), 400
 
     try:
-        # 1. Crear cliente
-        cliente = Cliente(
+        # 1. Crear cliente (con unificación por documento)
+        cliente, cliente_creado, _ = Cliente.obtener_o_crear(
             usuario_id=current_user.id,
             nombre=nombre[:100],
             apellido=apellido[:100] if apellido else None,
             telefono_whatsapp=telefono[:20],
             email=email[:120] if email else None,
             documento_identidad=documento[:30] if documento else None,
-            fecha_registro=datetime.utcnow()
+            actualizar_existente=True
         )
-        db.session.add(cliente)
-        db.session.flush()  # Para obtener el ID
+        db.session.flush()  # Para obtener el ID si es nuevo
 
         # 2. Extraer datos del PDF
+        ruta_fisica = archivo.obtener_ruta_fisica()
         datos_poliza = {}
         confianza = 0.5
 
-        if os.path.exists(archivo.ruta_archivo):
+        if os.path.exists(ruta_fisica):
             try:
                 extractor = ExtractorDatosPoliza()
-                datos_extraidos = extractor.extraer_datos(archivo.ruta_archivo)
+                datos_extraidos = extractor.extraer_datos(ruta_fisica)
                 if datos_extraidos:
                     datos_poliza = extractor.datos_para_poliza(datos_extraidos)
                     confianza = datos_extraidos.get('confianza', 0.5)
             except Exception as e:
-                print(f"Error extrayendo datos del PDF: {e}")
+                logger.warning(f"Error extrayendo datos del PDF: {e}")
 
         # 3. Crear póliza
         poliza = PolizaCliente(
@@ -1377,3 +1418,365 @@ def crear_desde_pdf(archivo_id):
         import traceback
         traceback.print_exc()
         return jsonify({'exito': False, 'error': str(e)}), 500
+
+
+# ============================================
+# REPASO DE CORRECCIONES DE COMPANIA
+# ============================================
+
+@main_bp.route('/archivos/repaso')
+@login_required
+def repaso_correcciones():
+    """Muestra archivos con correcciones de compania pendientes de reprocesar."""
+    if current_user.debe_cambiar_contrasena:
+        return redirect(url_for('auth.cambiar_contrasena_obligatorio'))
+
+    # Obtener archivos corregidos del usuario
+    archivos_corregidos = ArchivoDescargado.query.join(Escaneo).filter(
+        Escaneo.usuario_id == current_user.id,
+        ArchivoDescargado.correccion_compania == True
+    ).order_by(ArchivoDescargado.fecha_correccion.desc()).all()
+
+    # Obtener informacion de companias originales
+    for archivo in archivos_corregidos:
+        if archivo.compania_id_original:
+            archivo.compania_original = Compania.query.get(archivo.compania_id_original)
+        else:
+            archivo.compania_original = None
+
+    # Obtener todas las companias para el selector
+    companias = Compania.query.order_by(Compania.nombre).all()
+
+    return render_template('main/repaso_correcciones.html',
+                          archivos=archivos_corregidos,
+                          companias=companias,
+                          total_corregidos=len(archivos_corregidos))
+
+
+@main_bp.route('/api/archivos/reprocesar-corregidos', methods=['POST'])
+@login_required
+def api_reprocesar_corregidos():
+    """Reprocesa archivos con correcciones para actualizar polizas asociadas."""
+    from app.extractor.pdf_parser import ExtractorDatosPoliza
+
+    # Obtener archivos corregidos
+    archivos = ArchivoDescargado.query.join(Escaneo).filter(
+        Escaneo.usuario_id == current_user.id,
+        ArchivoDescargado.correccion_compania == True
+    ).all()
+
+    if not archivos:
+        return jsonify({
+            'success': True,
+            'message': 'No hay archivos con correcciones pendientes',
+            'procesados': 0
+        })
+
+    procesados = 0
+    errores = []
+
+    for archivo in archivos:
+        try:
+            # Actualizar poliza si existe
+            poliza = PolizaCliente.query.filter_by(archivo_id=archivo.id).first()
+            if poliza:
+                # Actualizar compania en la poliza
+                poliza.compania_id = archivo.compania_id
+
+                # Re-extraer datos del PDF si existe
+                ruta_fisica = archivo.obtener_ruta_fisica()
+                if os.path.exists(ruta_fisica):
+                    try:
+                        extractor = ExtractorDatosPoliza()
+                        datos = extractor.extraer_datos(ruta_fisica)
+                        if datos:
+                            # Actualizar campos extraidos
+                            campos_actualizados = 0
+                            for campo, valor in datos.items():
+                                if hasattr(poliza, campo) and valor is not None:
+                                    setattr(poliza, campo, valor)
+                                    campos_actualizados += 1
+                    except Exception as e:
+                        errores.append(f"Error extrayendo datos de {archivo.nombre_archivo}: {str(e)}")
+
+            # Marcar como procesado (limpiar flag de correccion)
+            archivo.correccion_compania = False
+
+            procesados += 1
+
+        except Exception as e:
+            errores.append(f"Error procesando {archivo.nombre_archivo}: {str(e)}")
+
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'message': f'Se reprocesaron {procesados} archivo(s)',
+        'procesados': procesados,
+        'errores': errores if errores else None
+    })
+
+
+@main_bp.route('/api/archivo/<int:archivo_id>/marcar-reprocesado', methods=['POST'])
+@login_required
+def api_marcar_reprocesado(archivo_id):
+    """Marca un archivo individual como reprocesado (limpia flag de correccion)."""
+    archivo = ArchivoDescargado.query.join(Escaneo).filter(
+        ArchivoDescargado.id == archivo_id,
+        Escaneo.usuario_id == current_user.id
+    ).first_or_404()
+
+    archivo.correccion_compania = False
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'message': 'Archivo marcado como reprocesado'
+    })
+
+
+# ============================================
+# RESET TOTAL DEL EXTRACTOR (SOLO DESARROLLO)
+# ============================================
+
+@main_bp.route('/api/extractor/reset-total', methods=['POST'])
+@login_required
+def api_reset_total_extractor():
+    """
+    PELIGROSO: Resetea completamente el extractor.
+    Borra TODOS los datos relacionados con escaneos, archivos y clientes.
+    Solo usar en desarrollo/testing.
+
+    Usa borrado directo sin subqueries para compatibilidad con SQLite.
+    """
+    from app.models import (
+        ArchivoDescargado, ArchivoRepositorio, CorreoProcesado,
+        Escaneo, LogEscaneo, HistorialEscaneoCarpeta, RangoCobertura,
+        RegistroAnalisisPDF, DominioRemitente, PolizaCliente, Cliente
+    )
+    import shutil
+
+    # Verificar confirmación
+    data = request.get_json() or {}
+    confirmar = data.get('confirmar', '')
+    if confirmar != 'BORRAR_TODO':
+        return jsonify({
+            'success': False,
+            'message': 'Debe enviar {"confirmar": "BORRAR_TODO"} para confirmar'
+        }), 400
+
+    resultados = {
+        'tablas_limpiadas': [],
+        'archivos_eliminados': 0,
+        'directorios_limpiados': [],
+        'errores': []
+    }
+
+    try:
+        # ============================================
+        # 1. BORRAR REGISTROS DE BD (en orden por FK)
+        # Usa approach simple: obtener IDs primero, luego borrar
+        # SQLite no maneja bien subqueries con DELETE
+        # ============================================
+
+        # Obtener IDs de escaneos del usuario
+        escaneo_ids = [e.id for e in Escaneo.query.filter_by(usuario_id=current_user.id).all()]
+
+        # Obtener IDs de archivos de esos escaneos
+        archivo_ids = []
+        if escaneo_ids:
+            archivo_ids = [a.id for a in ArchivoDescargado.query.filter(
+                ArchivoDescargado.escaneo_id.in_(escaneo_ids)
+            ).all()]
+
+        # Obtener IDs de cuentas Gmail del usuario
+        cuenta_ids = [c.id for c in CuentaGmail.query.filter_by(usuario_id=current_user.id).all()]
+
+        # Ahora borrar en orden correcto
+        try:
+            if archivo_ids:
+                count = RegistroAnalisisPDF.query.filter(
+                    RegistroAnalisisPDF.archivo_id.in_(archivo_ids)
+                ).delete(synchronize_session=False)
+            else:
+                count = 0
+            resultados['tablas_limpiadas'].append(f'RegistroAnalisisPDF: {count}')
+        except Exception as e:
+            resultados['errores'].append(f'RegistroAnalisisPDF: {e}')
+
+        try:
+            if archivo_ids:
+                count = PolizaCliente.query.filter(
+                    PolizaCliente.archivo_id.in_(archivo_ids)
+                ).delete(synchronize_session=False)
+            else:
+                count = 0
+            resultados['tablas_limpiadas'].append(f'PolizaCliente: {count}')
+        except Exception as e:
+            resultados['errores'].append(f'PolizaCliente: {e}')
+
+        try:
+            if escaneo_ids:
+                count = LogEscaneo.query.filter(
+                    LogEscaneo.escaneo_id.in_(escaneo_ids)
+                ).delete(synchronize_session=False)
+            else:
+                count = 0
+            resultados['tablas_limpiadas'].append(f'LogEscaneo: {count}')
+        except Exception as e:
+            resultados['errores'].append(f'LogEscaneo: {e}')
+
+        try:
+            if escaneo_ids:
+                count = HistorialEscaneoCarpeta.query.filter(
+                    HistorialEscaneoCarpeta.escaneo_id.in_(escaneo_ids)
+                ).delete(synchronize_session=False)
+            else:
+                count = 0
+            resultados['tablas_limpiadas'].append(f'HistorialEscaneoCarpeta: {count}')
+        except Exception as e:
+            resultados['errores'].append(f'HistorialEscaneoCarpeta: {e}')
+
+        try:
+            if escaneo_ids:
+                count = ArchivoDescargado.query.filter(
+                    ArchivoDescargado.escaneo_id.in_(escaneo_ids)
+                ).delete(synchronize_session=False)
+            else:
+                count = 0
+            resultados['tablas_limpiadas'].append(f'ArchivoDescargado: {count}')
+        except Exception as e:
+            resultados['errores'].append(f'ArchivoDescargado: {e}')
+
+        # CorreoProcesado - CRITICO para que el motor no salte correos
+        try:
+            if cuenta_ids:
+                count = CorreoProcesado.query.filter(
+                    CorreoProcesado.cuenta_gmail_id.in_(cuenta_ids)
+                ).delete(synchronize_session=False)
+            else:
+                count = 0
+            resultados['tablas_limpiadas'].append(f'CorreoProcesado: {count}')
+        except Exception as e:
+            resultados['errores'].append(f'CorreoProcesado: {e}')
+
+        # RangoCobertura - Rangos de fechas escaneadas
+        try:
+            if cuenta_ids:
+                count = RangoCobertura.query.filter(
+                    RangoCobertura.cuenta_gmail_id.in_(cuenta_ids)
+                ).delete(synchronize_session=False)
+            else:
+                count = 0
+            resultados['tablas_limpiadas'].append(f'RangoCobertura: {count}')
+        except Exception as e:
+            resultados['errores'].append(f'RangoCobertura: {e}')
+
+        try:
+            count = DominioRemitente.query.filter_by(
+                usuario_id=current_user.id
+            ).delete(synchronize_session=False)
+            resultados['tablas_limpiadas'].append(f'DominioRemitente: {count}')
+        except Exception as e:
+            resultados['errores'].append(f'DominioRemitente: {e}')
+
+        try:
+            count = Escaneo.query.filter_by(
+                usuario_id=current_user.id
+            ).delete(synchronize_session=False)
+            resultados['tablas_limpiadas'].append(f'Escaneo: {count}')
+        except Exception as e:
+            resultados['errores'].append(f'Escaneo: {e}')
+
+        try:
+            count = Cliente.query.filter_by(
+                usuario_id=current_user.id
+            ).delete(synchronize_session=False)
+            resultados['tablas_limpiadas'].append(f'Cliente: {count}')
+        except Exception as e:
+            resultados['errores'].append(f'Cliente: {e}')
+
+        # Borrar repositorio de archivos (global)
+        try:
+            count = ArchivoRepositorio.query.delete(synchronize_session=False)
+            resultados['tablas_limpiadas'].append(f'ArchivoRepositorio: {count}')
+        except Exception as e:
+            resultados['errores'].append(f'ArchivoRepositorio: {e}')
+
+        db.session.commit()
+
+        # ============================================
+        # 2. BORRAR ARCHIVOS FISICOS
+        # ============================================
+        import sys
+        if getattr(sys, 'frozen', False):
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+        # Borrar repositorio_archivos
+        repo_dir = os.path.join(base_dir, 'repositorio_archivos')
+        if os.path.exists(repo_dir):
+            try:
+                for item in os.listdir(repo_dir):
+                    item_path = os.path.join(repo_dir, item)
+                    if os.path.isdir(item_path):
+                        shutil.rmtree(item_path)
+                        resultados['archivos_eliminados'] += 1
+                    elif os.path.isfile(item_path):
+                        os.remove(item_path)
+                        resultados['archivos_eliminados'] += 1
+                resultados['directorios_limpiados'].append('repositorio_archivos')
+            except Exception as e:
+                resultados['errores'].append(f'repositorio_archivos: {e}')
+
+        # Borrar scan_buffers
+        buffers_dir = os.path.join(base_dir, 'logs', 'scan_buffers')
+        if os.path.exists(buffers_dir):
+            try:
+                for item in os.listdir(buffers_dir):
+                    item_path = os.path.join(buffers_dir, item)
+                    if os.path.isfile(item_path):
+                        os.remove(item_path)
+                        resultados['archivos_eliminados'] += 1
+                resultados['directorios_limpiados'].append('logs/scan_buffers')
+            except Exception as e:
+                resultados['errores'].append(f'scan_buffers: {e}')
+
+        # Borrar scan_states
+        states_dir = os.path.join(base_dir, 'logs', 'scan_states')
+        if os.path.exists(states_dir):
+            try:
+                for item in os.listdir(states_dir):
+                    item_path = os.path.join(states_dir, item)
+                    if os.path.isfile(item_path):
+                        os.remove(item_path)
+                        resultados['archivos_eliminados'] += 1
+                resultados['directorios_limpiados'].append('logs/scan_states')
+            except Exception as e:
+                resultados['errores'].append(f'scan_states: {e}')
+
+        # Borrar archivos_usuarios (opcional, contiene archivos de usuario)
+        usuarios_dir = os.path.join(base_dir, 'archivos_usuarios', str(current_user.id))
+        if os.path.exists(usuarios_dir):
+            try:
+                shutil.rmtree(usuarios_dir)
+                resultados['directorios_limpiados'].append(f'archivos_usuarios/{current_user.id}')
+            except Exception as e:
+                resultados['errores'].append(f'archivos_usuarios: {e}')
+
+        return jsonify({
+            'success': True,
+            'message': 'Reset total completado',
+            'resultados': resultados
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'message': f'Error durante reset: {str(e)}',
+            'resultados': resultados
+        }), 500

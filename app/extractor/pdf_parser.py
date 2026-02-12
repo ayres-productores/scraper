@@ -4,11 +4,14 @@ Utiliza PyMuPDF para extraer texto y patrones regex para identificar datos.
 Version mejorada con patrones especificos por compania aseguradora argentina.
 """
 
+import json
+import logging
 import re
 import fitz  # PyMuPDF
 from decimal import Decimal
 from datetime import datetime
-import json
+
+logger = logging.getLogger('app.extractor.pdf_parser')
 
 
 class ExtractorDatosPoliza:
@@ -375,7 +378,7 @@ class ExtractorDatosPoliza:
             self.texto_completo = texto
             return texto
         except Exception as e:
-            print(f"Error al leer PDF {ruta_pdf}: {e}")
+            logger.warning(f"Error al leer PDF {ruta_pdf}: {e}")
             return ""
 
     def detectar_compania(self, texto=None):
@@ -1786,7 +1789,7 @@ class ExtractorDatosPoliza:
 
         return round(confianza, 2)
 
-    def es_poliza_valida(self, datos=None, nombre_archivo=None):
+    def es_poliza_valida(self, datos=None, nombre_archivo=None, dev_options=None):
         """
         Determina si el documento es una póliza/recibo válido para guardar.
 
@@ -1798,11 +1801,26 @@ class ExtractorDatosPoliza:
         - Confianza muy baja (<45%)
         - Texto de disclaimer como "asegurado"
 
+        Args:
+            datos: Diccionario con datos extraídos
+            nombre_archivo: Nombre original del archivo
+            dev_options: Opciones de desarrollo para bypass de validaciones
+
         Returns:
             tuple: (es_valida: bool, motivo_rechazo: str or None)
         """
         if datos is None:
             datos = self.datos_extraidos
+
+        # Opciones de desarrollo (permiten bypass de validaciones)
+        dev_options = dev_options or {}
+        permitir_facturas = dev_options.get('permitir_facturas', False)
+        permitir_sin_asegurado = dev_options.get('permitir_sin_asegurado', False)
+        permitir_sin_poliza = dev_options.get('permitir_sin_poliza', False)
+        permitir_sin_fechas = dev_options.get('permitir_sin_fechas', False)
+        permitir_baja_confianza = dev_options.get('permitir_baja_confianza', False)
+        permitir_condiciones_grales = dev_options.get('permitir_condiciones_grales', False)
+        permitir_servicios = dev_options.get('permitir_servicios', False)
 
         nombre_archivo = nombre_archivo or ""
         nombre_lower = nombre_archivo.lower()
@@ -1815,12 +1833,14 @@ class ExtractorDatosPoliza:
             return (False, "constancia_adhesion")
 
         # Rechazar por nombre de archivo que indica servicio no seguro
-        servicios_en_nombre = ['starlink', 'netflix', 'spotify', 'amazon', 'mercadolibre',
-                               'telecom', 'telefonica', 'movistar', 'personal', 'claro',
-                               'edenor', 'edesur', 'metrogas', 'aysa', 'recibo', 'factura']
-        for servicio in servicios_en_nombre:
-            if servicio in nombre_lower:
-                return (False, f"nombre_archivo_{servicio}")
+        # (a menos que permitir_servicios esté activo)
+        if not permitir_servicios:
+            servicios_en_nombre = ['starlink', 'netflix', 'spotify', 'amazon', 'mercadolibre',
+                                   'telecom', 'telefonica', 'movistar', 'personal', 'claro',
+                                   'edenor', 'edesur', 'metrogas', 'aysa', 'recibo', 'factura']
+            for servicio in servicios_en_nombre:
+                if servicio in nombre_lower:
+                    return (False, f"nombre_archivo_{servicio}")
 
         # ============================================================
         # RECHAZAR FACTURAS Y COMPROBANTES FISCALES
@@ -1853,36 +1873,40 @@ class ExtractorDatosPoliza:
         contador_factura = sum(1 for p in palabras_factura if p in texto_lower)
 
         # Si tiene CAE o señales de factura, rechazar
-        if tiene_cae:
-            return (False, "factura_cae")
-        if contador_factura >= 2:  # Reducido de 3 a 2
-            return (False, "factura_comprobante")
+        # (a menos que permitir_facturas esté activo)
+        if not permitir_facturas:
+            if tiene_cae:
+                return (False, "factura_cae")
+            if contador_factura >= 2:  # Reducido de 3 a 2
+                return (False, "factura_comprobante")
 
         # Detectar servicios NO aseguradores conocidos (en contenido)
-        servicios_no_seguros = [
-            'starlink',
-            'enacom',
-            'ente nacional de comunicaciones',
-            'telecom argentina',
-            'telefonica',
-            'movistar',
-            'personal.com',
-            'claro argentina',
-            'edenor',
-            'edesur',
-            'metrogas',
-            'aysa',
-            'netflix',
-            'spotify',
-            'amazon prime',
-            'mercado pago',
-            'mercadolibre',
-            'rapipago',
-            'pago fácil',
-        ]
-        for servicio in servicios_no_seguros:
-            if servicio in texto_lower:
-                return (False, f"servicio_no_seguro_{servicio}")
+        # (a menos que permitir_servicios esté activo)
+        if not permitir_servicios:
+            servicios_no_seguros = [
+                'starlink',
+                'enacom',
+                'ente nacional de comunicaciones',
+                'telecom argentina',
+                'telefonica',
+                'movistar',
+                'personal.com',
+                'claro argentina',
+                'edenor',
+                'edesur',
+                'metrogas',
+                'aysa',
+                'netflix',
+                'spotify',
+                'amazon prime',
+                'mercado pago',
+                'mercadolibre',
+                'rapipago',
+                'pago fácil',
+            ]
+            for servicio in servicios_no_seguros:
+                if servicio in texto_lower:
+                    return (False, f"servicio_no_seguro_{servicio}")
 
         # ============================================================
         # VERIFICAR QUE SEA DOCUMENTO DE SEGURO (debe tener palabras clave)
@@ -1901,90 +1925,99 @@ class ExtractorDatosPoliza:
 
         # ============================================================
         # RECHAZAR POR CONFIANZA MUY BAJA
+        # (a menos que permitir_baja_confianza esté activo)
         # ============================================================
         confianza = datos.get('confianza', 0)
-        if confianza < 0.45:
+        if confianza < 0.45 and not permitir_baja_confianza:
             return (False, f"confianza_baja_{int(confianza*100)}%")
 
         # ============================================================
         # RECHAZAR SI NO HAY ASEGURADO VÁLIDO
+        # (a menos que permitir_sin_asegurado esté activo)
         # ============================================================
-        asegurado = datos.get('asegurado_nombre')
-        if not asegurado:
-            return (False, "sin_asegurado")
+        if not permitir_sin_asegurado:
+            asegurado = datos.get('asegurado_nombre')
+            if not asegurado:
+                return (False, "sin_asegurado")
 
-        # Rechazar si el "asegurado" es texto de disclaimer/legal
-        textos_invalidos = [
-            'podrán solicitar información',
-            'superintendencia de seguros',
-            'asegurador no',
-            'clausula',
-            'condiciones generales',
-            'si no reclama',
-            'fecha vto',
-            'general lopez',  # Dirección, no nombre
-        ]
-        asegurado_lower = asegurado.lower()
-        for texto in textos_invalidos:
-            if texto in asegurado_lower:
-                return (False, f"asegurado_invalido_{texto[:20]}")
+            # Rechazar si el "asegurado" es texto de disclaimer/legal
+            textos_invalidos = [
+                'podrán solicitar información',
+                'superintendencia de seguros',
+                'asegurador no',
+                'clausula',
+                'condiciones generales',
+                'si no reclama',
+                'fecha vto',
+                'general lopez',  # Dirección, no nombre
+            ]
+            asegurado_lower = asegurado.lower()
+            for texto in textos_invalidos:
+                if texto in asegurado_lower:
+                    return (False, f"asegurado_invalido_{texto[:20]}")
 
-        # Asegurado muy corto (menos de 4 caracteres reales)
-        if len(asegurado.replace(' ', '').replace(',', '')) < 4:
-            return (False, "asegurado_muy_corto")
+            # Asegurado muy corto (menos de 4 caracteres reales)
+            if len(asegurado.replace(' ', '').replace(',', '')) < 4:
+                return (False, "asegurado_muy_corto")
 
         # ============================================================
         # RECHAZAR SI NO HAY NÚMERO DE PÓLIZA VÁLIDO
+        # (a menos que permitir_sin_poliza esté activo)
         # ============================================================
-        numero_poliza = datos.get('numero_poliza')
-        if not numero_poliza:
-            return (False, "sin_numero_poliza")
+        if not permitir_sin_poliza:
+            numero_poliza = datos.get('numero_poliza')
+            if not numero_poliza:
+                return (False, "sin_numero_poliza")
 
-        # Rechazar si el número de póliza es claramente inválido
-        poliza_invalida = [
-            'ha',  # Error común de extracción
-            'seccion',
-            'n/a',
-        ]
-        if numero_poliza.lower() in poliza_invalida:
-            return (False, f"poliza_invalida_{numero_poliza}")
+            # Rechazar si el número de póliza es claramente inválido
+            poliza_invalida = [
+                'ha',  # Error común de extracción
+                'seccion',
+                'n/a',
+            ]
+            if numero_poliza.lower() in poliza_invalida:
+                return (False, f"poliza_invalida_{numero_poliza}")
 
-        # Número de póliza muy corto (menos de 5 caracteres)
-        poliza_limpia = numero_poliza.replace(':', '').replace('-', '')
-        if len(poliza_limpia) < 5:
-            return (False, "poliza_muy_corta")
+            # Número de póliza muy corto (menos de 5 caracteres)
+            poliza_limpia = numero_poliza.replace(':', '').replace('-', '')
+            if len(poliza_limpia) < 5:
+                return (False, "poliza_muy_corta")
 
         # ============================================================
         # RECHAZAR SI NO HAY AL MENOS UNA FECHA DE VIGENCIA
+        # (a menos que permitir_sin_fechas esté activo)
         # ============================================================
-        tiene_fecha_desde = datos.get('fecha_desde_texto') or datos.get('fecha_vigencia_desde')
-        tiene_fecha_hasta = datos.get('fecha_hasta_texto') or datos.get('fecha_vigencia_hasta')
+        if not permitir_sin_fechas:
+            tiene_fecha_desde = datos.get('fecha_desde_texto') or datos.get('fecha_vigencia_desde')
+            tiene_fecha_hasta = datos.get('fecha_hasta_texto') or datos.get('fecha_vigencia_hasta')
 
-        if not tiene_fecha_desde and not tiene_fecha_hasta:
-            return (False, "sin_fechas_vigencia")
+            if not tiene_fecha_desde and not tiene_fecha_hasta:
+                return (False, "sin_fechas_vigencia")
 
         # ============================================================
         # RECHAZAR DOCUMENTOS DE CONDICIONES GENERALES
+        # (a menos que permitir_condiciones_grales esté activo)
         # ============================================================
-        # (texto_muestra ya fue definido arriba en la sección de facturas)
+        if not permitir_condiciones_grales:
+            # (texto_muestra ya fue definido arriba en la sección de facturas)
 
-        # Señales de documento de condiciones generales (muchos disclaimers)
-        señales_condiciones = [
-            'CONDICIONES GENERALES',
-            'CLAUSULAS GENERALES',
-            'ANEXO DE COBERTURA',
-            'el presente contrato se rige',
-            'la aseguradora no responderá',
-        ]
+            # Señales de documento de condiciones generales (muchos disclaimers)
+            señales_condiciones = [
+                'CONDICIONES GENERALES',
+                'CLAUSULAS GENERALES',
+                'ANEXO DE COBERTURA',
+                'el presente contrato se rige',
+                'la aseguradora no responderá',
+            ]
 
-        contador_señales = 0
-        for señal in señales_condiciones:
-            if señal.lower() in texto_muestra.lower():
-                contador_señales += 1
+            contador_señales = 0
+            for señal in señales_condiciones:
+                if señal.lower() in texto_muestra.lower():
+                    contador_señales += 1
 
-        # Si tiene muchas señales de condiciones generales, rechazar
-        if contador_señales >= 2:
-            return (False, "documento_condiciones_generales")
+            # Si tiene muchas señales de condiciones generales, rechazar
+            if contador_señales >= 2:
+                return (False, "documento_condiciones_generales")
 
         # ============================================================
         # DOCUMENTO VÁLIDO
@@ -2351,18 +2384,19 @@ def extraer_datos_poliza(ruta_pdf, aplicar_aprendizaje=True):
         except ImportError:
             pass  # Módulo de aprendizaje no disponible
         except Exception as e:
-            print(f"Error aplicando aprendizaje: {e}")
+            logger.warning(f"Error aplicando aprendizaje: {e}")
 
     return datos_poliza
 
 
-def extraer_y_validar_poliza(ruta_pdf, nombre_archivo=None):
+def extraer_y_validar_poliza(ruta_pdf, nombre_archivo=None, dev_options=None):
     """
     Extrae datos de un PDF y valida si es una póliza válida para guardar.
 
     Args:
         ruta_pdf: Ruta al archivo PDF
         nombre_archivo: Nombre original del archivo (para detectar constancias, etc.)
+        dev_options: Opciones de desarrollo para bypass de validaciones
 
     Returns:
         dict con:
@@ -2370,13 +2404,19 @@ def extraer_y_validar_poliza(ruta_pdf, nombre_archivo=None):
             - motivo_rechazo: str or None
             - datos: dict con todos los datos extraídos
             - datos_poliza: dict con campos para el modelo PolizaCliente
+            - texto: str con el texto completo del PDF (para detección de compañía)
     """
     extractor = ExtractorDatosPoliza()
+
+    # Extraer texto primero (para retornarlo junto con los datos)
+    texto_pdf = extractor.extraer_texto_pdf(ruta_pdf)
+
+    # Extraer datos
     datos = extractor.extraer_datos(ruta_pdf)
 
     # Re-validar con nombre de archivo si se proporciona
     if nombre_archivo:
-        es_valida, motivo = extractor.es_poliza_valida(datos, nombre_archivo)
+        es_valida, motivo = extractor.es_poliza_valida(datos, nombre_archivo, dev_options)
         datos['es_poliza_valida'] = es_valida
         datos['motivo_rechazo'] = motivo
 
@@ -2386,4 +2426,5 @@ def extraer_y_validar_poliza(ruta_pdf, nombre_archivo=None):
         'datos': datos,
         'datos_poliza': extractor.datos_para_poliza(datos) if datos.get('es_poliza_valida') else None,
         'resumen': extractor.resumen_extraccion(),
+        'texto': texto_pdf or '',  # Texto completo para detección de compañía
     }

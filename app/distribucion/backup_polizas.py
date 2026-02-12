@@ -5,10 +5,13 @@ Guarda copias permanentes de los PDFs cuando se asignan a pólizas.
 Estos backups NO se eliminan cuando se limpian los archivos del extractor.
 """
 
+import logging
 import os
 import shutil
 from datetime import datetime
 from flask import current_app
+
+logger = logging.getLogger('app.distribucion.backup_polizas')
 
 
 def obtener_carpeta_backup():
@@ -80,7 +83,7 @@ def crear_backup_poliza(poliza, archivo_origen=None):
         return ruta_backup
 
     except Exception as e:
-        print(f"Error creando backup de póliza {poliza.id}: {e}")
+        logger.error(f"Error creando backup de póliza {poliza.id}: {e}")
         return None
 
 
@@ -171,7 +174,7 @@ def eliminar_backup_poliza(poliza):
         return True
 
     except Exception as e:
-        print(f"Error eliminando backup de póliza {poliza.id}: {e}")
+        logger.error(f"Error eliminando backup de póliza {poliza.id}: {e}")
         return False
 
 

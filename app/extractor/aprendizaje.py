@@ -8,12 +8,15 @@ Arquitectura híbrida:
 """
 
 import json
+import logging
 import os
 import re
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from difflib import SequenceMatcher
+
+logger = logging.getLogger('app.extractor.aprendizaje')
 
 # Rutas a los archivos de configuración
 CONFIG_DIR = os.path.join(os.path.dirname(__file__), 'config')
@@ -46,7 +49,7 @@ def _guardar_json(filepath: str, data: dict) -> bool:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return True
     except Exception as e:
-        print(f"Error guardando {filepath}: {e}")
+        logger.error(f"Error guardando {filepath}: {e}")
         return False
 
 
@@ -552,7 +555,7 @@ class MotorAprendizaje:
             # Módulo de modelos no disponible (ej: tests)
             return False
         except Exception as e:
-            print(f"Error guardando correcciones en BD: {e}")
+            logger.error(f"Error guardando correcciones en BD: {e}")
             return False
 
     def obtener_estadisticas_log(self) -> Dict:

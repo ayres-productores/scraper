@@ -5,10 +5,13 @@ Gestor de Reglas - Manipula los archivos JSON de configuración.
 """
 
 import json
+import logging
 import os
+import shutil
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
-import shutil
+
+logger = logging.getLogger('app.extractor.gestor_reglas')
 
 # Rutas a los archivos de configuración
 CONFIG_DIR = os.path.join(os.path.dirname(__file__), 'config')
@@ -42,7 +45,7 @@ def _guardar_json(filepath: str, data: dict, crear_backup: bool = True) -> bool:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return True
     except Exception as e:
-        print(f"Error guardando {filepath}: {e}")
+        logger.error(f"Error guardando {filepath}: {e}")
         return False
 
 
