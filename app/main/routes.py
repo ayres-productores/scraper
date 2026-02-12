@@ -373,7 +373,8 @@ def eliminar_archivos_multiple():
                 # Eliminar registro
                 db.session.delete(archivo)
                 eliminados += 1
-        except (ValueError, Exception):
+        except Exception as e:
+            logger.warning(f"Error eliminando archivo {archivo_id}: {e}")
             continue
 
     db.session.commit()
@@ -416,6 +417,7 @@ def limpiar_archivos_huerfanos():
             db.session.delete(archivo)
             eliminados += 1
         except Exception as e:
+            logger.warning(f"Error limpiando registro huérfano {archivo.id}: {e}")
             continue
 
     db.session.commit()
@@ -893,8 +895,8 @@ def api_corregir_campo(archivo_id):
                         break
                     except ValueError:
                         continue
-            except Exception:
-                pass
+            except (TypeError, AttributeError):
+                pass  # Valor no es string o formato inválido
         # Campos numéricos
         elif campo in ['vehiculo_anio', 'inmueble_superficie']:
             try:

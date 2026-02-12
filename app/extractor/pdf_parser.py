@@ -8,7 +8,7 @@ import json
 import logging
 import re
 import fitz  # PyMuPDF
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from datetime import datetime
 
 logger = logging.getLogger('app.extractor.pdf_parser')
@@ -486,7 +486,7 @@ class ExtractorDatosPoliza:
         for fmt in formatos:
             try:
                 return datetime.strptime(texto_fecha, fmt).date()
-            except:
+            except (ValueError, TypeError):
                 continue
         return None
 
@@ -542,7 +542,7 @@ class ExtractorDatosPoliza:
             if valor >= 0 and valor < Decimal('999999999999'):
                 return valor
             return None
-        except:
+        except (ValueError, TypeError, InvalidOperation):
             return None
 
     def _limpiar_nombre(self, nombre):
@@ -719,8 +719,8 @@ class ExtractorDatosPoliza:
                     num = float(v.replace(',', ''))
                     if num > 500 and num < 500000:  # Rango típico de primas
                         valores_primas.append((v, num))
-                except:
-                    pass
+                except (ValueError, TypeError):
+                    pass  # Valor no es número válido
 
             if valores_primas:
                 # El premio es el mayor en este rango, la prima el segundo
@@ -1480,7 +1480,7 @@ class ExtractorDatosPoliza:
             try:
                 total = sum(float(i.replace('.', '').replace(',', '.')) for i in cuotas_importes)
                 datos['prima_texto'] = f"{total:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-            except:
+            except (ValueError, TypeError):
                 datos['prima_texto'] = primer_importe
 
         # Prima (cerca de "Prima:")
@@ -1514,8 +1514,8 @@ class ExtractorDatosPoliza:
                     valor = int(valor_str)
                     if 10000 < valor < 10000000:
                         datos['prima_total'] = valor_str
-                except:
-                    pass
+                except (ValueError, TypeError):
+                    pass  # No es número válido
 
         # ============================================================
         # CUOTAS
@@ -1676,14 +1676,14 @@ class ExtractorDatosPoliza:
         if datos.get('vehiculo_anio'):
             try:
                 datos['vehiculo_anio'] = int(datos['vehiculo_anio'])
-            except:
+            except (ValueError, TypeError):
                 datos['vehiculo_anio'] = None
 
         # Parsear cuotas
         if datos.get('cantidad_cuotas'):
             try:
                 datos['cantidad_cuotas'] = int(datos['cantidad_cuotas'])
-            except:
+            except (ValueError, TypeError):
                 datos['cantidad_cuotas'] = None
 
         # Detectar tipo de seguro
@@ -2123,7 +2123,7 @@ class ExtractorDatosPoliza:
         try:
             from app.extractor.aprendizaje import obtener_motor
             motor = obtener_motor()
-        except:
+        except ImportError:
             motor = None
 
         def crear_campo(valor, texto_original=None, confianza=0.5, fuente='regex'):
@@ -2149,8 +2149,8 @@ class ExtractorDatosPoliza:
                             'original': valor,
                             'aplicado': valor_final
                         })
-                except:
-                    pass
+                except (KeyError, TypeError, AttributeError):
+                    pass  # Estructura de corrección inesperada
 
             return {
                 'valor': valor_final,

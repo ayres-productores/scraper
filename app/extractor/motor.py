@@ -296,8 +296,8 @@ class MotorExtractorWeb:
                 from app.models import db
                 db.session.commit()
                 self.logs_pendientes = 0
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"No se pudo hacer commit de logs: {e}")
 
     def probar_conexion(self, correo, contrasena):
         """Prueba la conexión a Gmail con timeout y cierre garantizado."""
@@ -1399,7 +1399,7 @@ class MotorExtractorWeb:
                                 )
                             else:
                                 fecha_correo = datetime.now()
-                        except:
+                        except (ValueError, TypeError, OverflowError):
                             fecha_correo = datetime.now()
 
                         # Actualizar fecha más reciente de esta carpeta
@@ -1569,8 +1569,8 @@ class MotorExtractorWeb:
                                         # Limpiar archivo temporal
                                         try:
                                             os.unlink(tmp_path)
-                                        except:
-                                            pass
+                                        except OSError:
+                                            pass  # Archivo temporal ya eliminado o inaccesible
 
                                     except Exception as e_val:
                                         # Si falla validación, fallback a detección por dominio
@@ -1581,8 +1581,8 @@ class MotorExtractorWeb:
                                                 nombre_cia = compania.nombre
                                         try:
                                             os.unlink(tmp_path)
-                                        except:
-                                            pass
+                                        except OSError:
+                                            pass  # Archivo temporal ya eliminado o inaccesible
                                 else:
                                     # Sin validación - detectar compañía por dominio
                                     compania = Compania.detectar_solo(remitente)
@@ -1781,8 +1781,8 @@ class MotorExtractorWeb:
                                                 # Limpiar archivo temporal
                                                 try:
                                                     os.unlink(tmp_path)
-                                                except:
-                                                    pass
+                                                except OSError:
+                                                    pass  # Archivo temporal ya eliminado
 
                                             except Exception as e_val:
                                                 # Si falla validación, fallback a detección por dominio
@@ -1793,8 +1793,8 @@ class MotorExtractorWeb:
                                                         nombre_cia = compania.nombre
                                                 try:
                                                     os.unlink(tmp_path)
-                                                except:
-                                                    pass
+                                                except OSError:
+                                                    pass  # Archivo temporal ya eliminado
                                         else:
                                             # Sin validación - detectar compañía por dominio
                                             compania = Compania.detectar_solo(remitente)

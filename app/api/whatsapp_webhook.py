@@ -3,17 +3,56 @@ Webhook para recibir eventos de WhatsApp Business API (Meta)
 
 Este módulo maneja:
 - Verificación del webhook (challenge de Meta)
+- Validación de firma HMAC-SHA256 de Meta
 - Eventos de estado de mensajes (sent, delivered, read)
 """
 
+import hmac
+import hashlib
 import logging
 from datetime import datetime
-from flask import request, jsonify, current_app
+from flask import request, jsonify, current_app, abort
 from app import db
 from app.models import EnvioWhatsApp
 from app.api.routes import api_bp
+from app.utils.structured_logger import log_whatsapp, log_seguridad
 
 logger = logging.getLogger(__name__)
+
+
+def verificar_firma_meta(payload: bytes, signature_header: str, app_secret: str) -> bool:
+    """
+    Verifica la firma HMAC-SHA256 de Meta para webhooks.
+
+    Meta firma cada webhook con el App Secret usando HMAC-SHA256.
+    El header X-Hub-Signature-256 contiene: sha256=<firma_hexadecimal>
+
+    Args:
+        payload: Cuerpo del request en bytes (request.data)
+        signature_header: Valor del header X-Hub-Signature-256
+        app_secret: App Secret de la aplicación de Meta
+
+    Returns:
+        True si la firma es válida, False si no
+
+    Nota de seguridad:
+        Usa hmac.compare_digest() para evitar timing attacks.
+    """
+    if not signature_header or not signature_header.startswith('sha256='):
+        return False
+
+    # Extraer la firma del header (quitar prefijo 'sha256=')
+    firma_recibida = signature_header[7:]
+
+    # Calcular la firma esperada
+    firma_esperada = hmac.new(
+        app_secret.encode('utf-8'),
+        payload,
+        hashlib.sha256
+    ).hexdigest()
+
+    # Comparar de forma segura (timing-safe)
+    return hmac.compare_digest(firma_esperada, firma_recibida)
 
 
 @api_bp.route('/whatsapp/webhook', methods=['GET', 'POST'])
@@ -57,6 +96,11 @@ def procesar_evento_whatsapp():
     """
     Procesa eventos de estado de mensajes de WhatsApp.
 
+    SEGURIDAD: Valida la firma HMAC-SHA256 de Meta antes de procesar.
+    Sin esta validación, un atacante podría enviar webhooks falsos para:
+    - Marcar pólizas como "definitivas" sin consentimiento del cliente
+    - Inyectar datos falsos en el historial de comunicaciones
+
     Formato esperado de Meta:
     {
         "object": "whatsapp_business_account",
@@ -78,6 +122,45 @@ def procesar_evento_whatsapp():
         }]
     }
     """
+    # ================================================================
+    # VALIDACIÓN DE FIRMA HMAC (Seguridad crítica)
+    # ================================================================
+    app_secret = current_app.config.get('WHATSAPP_APP_SECRET')
+    signature = request.headers.get('X-Hub-Signature-256', '')
+
+    if app_secret:
+        # App Secret configurado - VALIDAR firma obligatoriamente
+        if not verificar_firma_meta(request.data, signature, app_secret):
+            # Firma inválida - posible ataque
+            logger.warning(
+                f"[Webhook] FIRMA INVÁLIDA - Posible ataque. "
+                f"IP: {request.remote_addr}, "
+                f"Signature: {signature[:20]}..." if signature else "sin firma"
+            )
+
+            # Log estructurado de seguridad
+            log_seguridad('webhook_firma_invalida', 'error',
+                          ip=request.remote_addr,
+                          user_agent=request.headers.get('User-Agent', '')[:100],
+                          signature_presente=bool(signature),
+                          content_length=len(request.data))
+
+            return jsonify({'status': 'error', 'message': 'Invalid signature'}), 403
+    else:
+        # App Secret NO configurado - solo loguear advertencia
+        # Esto permite que instalaciones existentes sigan funcionando
+        # pero incentiva a configurar el App Secret
+        if current_app.debug:
+            logger.debug("[Webhook] WHATSAPP_APP_SECRET no configurado - firma NO validada")
+        else:
+            logger.warning(
+                "[Webhook] WHATSAPP_APP_SECRET no configurado - webhook procesado SIN validar firma. "
+                "Configure WHATSAPP_APP_SECRET para mayor seguridad."
+            )
+
+    # ================================================================
+    # PROCESAMIENTO DEL WEBHOOK
+    # ================================================================
     try:
         data = request.get_json()
 
@@ -126,7 +209,7 @@ def procesar_estado_mensaje(status):
     if timestamp_str:
         try:
             timestamp = datetime.fromtimestamp(int(timestamp_str))
-        except:
+        except (ValueError, TypeError, OSError):
             timestamp = datetime.utcnow()
 
     # Buscar el envío por wamid
@@ -134,15 +217,36 @@ def procesar_estado_mensaje(status):
 
     if not envio:
         logger.warning(f"[Webhook] Envío no encontrado para wamid: {wamid}")
+        log_whatsapp('estado_mensaje', 'advertencia',
+                     wamid=wamid,
+                     estado_recibido=estado,
+                     error='envio_no_encontrado')
         return
 
     # Actualizar estado
+    estado_anterior = envio.estado_mensaje
     envio.actualizar_estado_mensaje(estado, timestamp)
     db.session.commit()
 
     logger.info(f"[Webhook] Estado actualizado - wamid: {wamid}, estado: {estado}")
 
+    # Log estructurado: estado de mensaje actualizado
+    log_whatsapp('estado_mensaje', 'exito',
+                 wamid=wamid,
+                 estado_anterior=estado_anterior,
+                 estado_nuevo=estado,
+                 cliente_id=envio.cliente_id,
+                 envio_id=envio.id)
+
     # Log adicional si es lectura confirmada
     if estado == 'read':
         cliente_nombre = envio.cliente.nombre_completo if envio.cliente else 'Desconocido'
         logger.info(f"[Webhook] Mensaje leído por {cliente_nombre} - Póliza/Archivo marcados como definitivos")
+
+        # Log estructurado: póliza confirmada automáticamente
+        log_whatsapp('poliza_confirmada_auto', 'exito',
+                     wamid=wamid,
+                     cliente_id=envio.cliente_id,
+                     cliente_nombre=cliente_nombre,
+                     poliza_id=envio.poliza_cliente_id,
+                     confirmado_por='whatsapp_read')

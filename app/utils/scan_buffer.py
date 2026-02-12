@@ -323,7 +323,7 @@ class ScanBuffer:
             primer_id = ArchivoDescargado.generar_siguiente_id()
             try:
                 id_base = int(primer_id.replace('PDF-', ''))
-            except:
+            except (ValueError, TypeError, AttributeError):
                 id_base = 1
 
             for idx, pdf_data in enumerate(self.pdfs):

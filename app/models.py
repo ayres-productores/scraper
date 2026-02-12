@@ -12,9 +12,15 @@ import hashlib
 
 
 def obtener_cipher():
-    """Obtiene el cipher para encriptar/desencriptar credenciales."""
+    """
+    Obtiene el cipher para encriptar/desencriptar credenciales.
+
+    DEPRECADO: Este método usa SHA-256 sin salt (vulnerable).
+    Usar app.utils.encryption para nuevas credenciales.
+    Mantenido para compatibilidad con credenciales legacy.
+    """
     key = current_app.config['ENCRYPTION_KEY']
-    # Convertir a 32 bytes usando hash
+    # Convertir a 32 bytes usando hash (método legacy)
     key_bytes = hashlib.sha256(key.encode()).digest()
     key_b64 = base64.urlsafe_b64encode(key_bytes)
     return Fernet(key_b64)
@@ -159,6 +165,8 @@ class CuentaGmail(db.Model):
     usuario_id = db.Column(db.Integer, db.ForeignKey('usuarios.id'), nullable=False, index=True)
     correo_gmail = db.Column(db.String(120), nullable=False)
     contrasena_app_encriptada = db.Column(db.Text, nullable=False)
+    # Salt para derivación de clave (NULL = formato legacy sin salt)
+    encryption_salt = db.Column(db.String(64), nullable=True)
     activa = db.Column(db.Boolean, default=True)
     fecha_agregada = db.Column(db.DateTime, default=datetime.utcnow)
     ultimo_escaneo = db.Column(db.DateTime, nullable=True)
@@ -167,14 +175,52 @@ class CuentaGmail(db.Model):
     escaneos = db.relationship('Escaneo', backref='cuenta_gmail', lazy='dynamic')
 
     def establecer_contrasena_app(self, contrasena):
-        """Encripta y guarda la contraseña de aplicación."""
-        cipher = obtener_cipher()
-        self.contrasena_app_encriptada = cipher.encrypt(contrasena.encode()).decode()
+        """
+        Encripta y guarda la contraseña de aplicación.
+
+        Usa el nuevo sistema de encriptación con salt único por cuenta.
+        """
+        from app.utils.encryption import encrypt_credential
+        encrypted, salt = encrypt_credential(contrasena)
+        self.contrasena_app_encriptada = encrypted
+        self.encryption_salt = salt
 
     def obtener_contrasena_app(self):
-        """Desencripta y devuelve la contraseña de aplicación."""
-        cipher = obtener_cipher()
-        return cipher.decrypt(self.contrasena_app_encriptada.encode()).decode()
+        """
+        Desencripta y devuelve la contraseña de aplicación.
+
+        Soporta tanto formato nuevo (con salt) como legacy (sin salt)
+        para compatibilidad con cuentas existentes.
+        """
+        from app.utils.encryption import decrypt_credential
+        return decrypt_credential(
+            self.contrasena_app_encriptada,
+            salt=self.encryption_salt  # None para cuentas legacy
+        )
+
+    def usar_encriptacion_moderna(self):
+        """Verifica si esta cuenta usa encriptación con salt."""
+        return self.encryption_salt is not None
+
+    def migrar_encriptacion(self):
+        """
+        Migra esta cuenta al nuevo sistema de encriptación con salt.
+
+        Uso:
+            cuenta.migrar_encriptacion()
+            db.session.commit()
+
+        Returns:
+            bool: True si se migró, False si ya usaba el nuevo sistema
+        """
+        if self.usar_encriptacion_moderna():
+            return False
+
+        from app.utils.encryption import migrate_credential
+        new_encrypted, new_salt = migrate_credential(self.contrasena_app_encriptada)
+        self.contrasena_app_encriptada = new_encrypted
+        self.encryption_salt = new_salt
+        return True
 
     def __repr__(self):
         return f'<CuentaGmail {self.correo_gmail}>'
@@ -515,8 +561,107 @@ class Compania(db.Model):
         self.cantidad_documentos += 1
         self.fecha_ultimo_documento = datetime.utcnow()
 
+    @staticmethod
+    def detectar_solo(remitente):
+        """Detecta compañía por dominio del remitente SIN crear nueva.
+
+        Para usar durante escaneos donde no queremos escribir a la BD.
+        """
+        if not remitente:
+            return None
+
+        match = re.search(r'@([a-zA-Z0-9.-]+)', remitente)
+        if not match:
+            return None
+
+        dominio = match.group(1).lower()
+        return Compania.query.filter_by(dominio_email=dominio).first()
+
     def __repr__(self):
         return f'<Compania {self.nombre}>'
+
+
+class ArchivoRepositorio(db.Model):
+    """Repositorio central de archivos únicos (deduplicación por hash)."""
+
+    __tablename__ = 'archivos_repositorio'
+
+    id = db.Column(db.Integer, primary_key=True)
+    hash_sha256 = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    ruta_relativa = db.Column(db.String(300), nullable=False)  # ej: "ab/cd1234.../archivo.pdf"
+    nombre_original = db.Column(db.String(255), nullable=False)
+    tamano_bytes = db.Column(db.Integer, nullable=False)
+    fecha_primera_descarga = db.Column(db.DateTime, default=datetime.utcnow)
+    cantidad_referencias = db.Column(db.Integer, default=1)
+
+    # Relación con ArchivoDescargado
+    referencias = db.relationship('ArchivoDescargado', backref='archivo_repo', lazy='dynamic')
+
+    def obtener_ruta_fisica(self):
+        """Obtiene la ruta completa del archivo en disco."""
+        from flask import current_app
+        import os
+        return os.path.join(
+            current_app.config['REPOSITORIO_ARCHIVOS'],
+            self.ruta_relativa
+        )
+
+    def incrementar_referencias(self):
+        """Incrementa el contador de referencias."""
+        self.cantidad_referencias += 1
+
+    def decrementar_referencias(self):
+        """Decrementa el contador de referencias."""
+        if self.cantidad_referencias > 0:
+            self.cantidad_referencias -= 1
+
+    @staticmethod
+    def buscar_por_hash(hash_sha256):
+        """Busca un archivo en el repositorio por su hash."""
+        return ArchivoRepositorio.query.filter_by(hash_sha256=hash_sha256).first()
+
+    @staticmethod
+    def guardar_o_reusar(contenido: bytes, nombre_sugerido: str):
+        """Guarda archivo en repositorio o reutiliza si existe."""
+        import hashlib
+        import os
+        from flask import current_app
+
+        hash_sha256 = hashlib.sha256(contenido).hexdigest()
+
+        # Buscar existente
+        existente = ArchivoRepositorio.buscar_por_hash(hash_sha256)
+        if existente:
+            existente.incrementar_referencias()
+            return existente, True  # (repo, reutilizado)
+
+        # Crear nuevo
+        subcarpeta = hash_sha256[:2]
+        ruta_relativa = f"{subcarpeta}/{hash_sha256}/{nombre_sugerido}"
+        ruta_completa = os.path.join(
+            current_app.config['REPOSITORIO_ARCHIVOS'],
+            ruta_relativa
+        )
+
+        # Crear directorios si no existen
+        os.makedirs(os.path.dirname(ruta_completa), exist_ok=True)
+
+        # Escribir archivo
+        with open(ruta_completa, 'wb') as f:
+            f.write(contenido)
+
+        nuevo = ArchivoRepositorio(
+            hash_sha256=hash_sha256,
+            ruta_relativa=ruta_relativa,
+            nombre_original=nombre_sugerido,
+            tamano_bytes=len(contenido)
+        )
+        db.session.add(nuevo)
+        db.session.flush()
+        return nuevo, False  # (repo, reutilizado)
+
+    def __repr__(self):
+        return f'<ArchivoRepositorio {self.hash_sha256[:8]}... refs={self.cantidad_referencias}>'
 
 
 class ArchivoDescargado(db.Model):
@@ -546,6 +691,21 @@ class ArchivoDescargado(db.Model):
     fecha_confirmacion = db.Column(db.DateTime, nullable=True)
     confirmado_por = db.Column(db.String(50), nullable=True)  # 'whatsapp_read', 'manual'
 
+    # ========== CORRECCIÓN DE COMPAÑÍA ==========
+    correccion_compania = db.Column(db.Boolean, default=False)  # True si se corrigió la compañía
+    fecha_correccion = db.Column(db.DateTime, nullable=True)
+    compania_id_original = db.Column(db.Integer, nullable=True)  # Compañía antes de corregir
+
+    # ========== REPOSITORIO CENTRAL ==========
+    archivo_repo_id = db.Column(db.Integer, db.ForeignKey('archivos_repositorio.id'), nullable=True, index=True)
+
+    def obtener_ruta_fisica(self):
+        """Obtiene la ruta física del archivo (repositorio o legacy)."""
+        if self.archivo_repo:
+            return self.archivo_repo.obtener_ruta_fisica()
+        # Fallback para archivos antiguos
+        return self.ruta_archivo
+
     @staticmethod
     def generar_siguiente_id():
         """Genera el siguiente ID de documento disponible."""
@@ -560,8 +720,8 @@ class ArchivoDescargado(db.Model):
             try:
                 num = int(ultimo_doc[0].replace('PDF-', ''))
                 return f"PDF-{num + 1:04d}"
-            except:
-                pass
+            except (ValueError, TypeError, AttributeError):
+                pass  # Formato de ID inesperado, usar secuencial
         return f"PDF-{ultimo + 1:04d}"
 
     def __repr__(self):
@@ -721,6 +881,126 @@ class Cliente(db.Model):
             self.motivo_no_actual = None
 
         return es_actual, detalles
+
+    @staticmethod
+    def normalizar_documento(documento):
+        """
+        Normaliza un documento (DNI/CUIT/CUIL) quitando caracteres no numéricos.
+
+        Args:
+            documento: String con el documento (ej: "20-12345678-9", "12.345.678")
+
+        Returns:
+            str: Documento solo con números, o None si está vacío
+        """
+        if not documento:
+            return None
+        # Quitar todo excepto números
+        normalizado = ''.join(c for c in documento if c.isdigit())
+        return normalizado if normalizado else None
+
+    @classmethod
+    def buscar_por_documento(cls, usuario_id, documento):
+        """
+        Busca un cliente existente por documento.
+
+        Args:
+            usuario_id: ID del usuario dueño del cliente
+            documento: Documento a buscar (se normaliza automáticamente)
+
+        Returns:
+            Cliente o None
+        """
+        doc_normalizado = cls.normalizar_documento(documento)
+        if not doc_normalizado:
+            return None
+
+        # Buscar cliente con documento que coincida (normalizado)
+        clientes = cls.query.filter_by(
+            usuario_id=usuario_id,
+            activo=True
+        ).filter(
+            cls.documento_identidad.isnot(None)
+        ).all()
+
+        for cliente in clientes:
+            if cls.normalizar_documento(cliente.documento_identidad) == doc_normalizado:
+                return cliente
+
+        return None
+
+    @classmethod
+    def obtener_o_crear(cls, usuario_id, nombre, telefono_whatsapp,
+                        apellido=None, email=None, documento_identidad=None,
+                        notas=None, actualizar_existente=True):
+        """
+        Obtiene un cliente existente por documento o crea uno nuevo.
+
+        Si existe un cliente con el mismo documento (normalizado), retorna ese cliente.
+        Opcionalmente actualiza los datos del cliente existente.
+
+        Args:
+            usuario_id: ID del usuario dueño del cliente
+            nombre: Nombre del cliente
+            telefono_whatsapp: Teléfono de WhatsApp
+            apellido: Apellido (opcional)
+            email: Email (opcional)
+            documento_identidad: DNI/CUIT/CUIL (opcional)
+            notas: Notas adicionales (opcional)
+            actualizar_existente: Si True, actualiza datos del cliente existente
+
+        Returns:
+            tuple: (cliente, es_nuevo, mensaje)
+                - cliente: Instancia de Cliente
+                - es_nuevo: True si se creó, False si existía
+                - mensaje: Descripción de la acción realizada
+        """
+        # Buscar cliente existente por documento
+        cliente_existente = None
+        if documento_identidad:
+            cliente_existente = cls.buscar_por_documento(usuario_id, documento_identidad)
+
+        if cliente_existente:
+            mensaje = f"Cliente existente encontrado: {cliente_existente.nombre_completo}"
+
+            if actualizar_existente:
+                # Actualizar datos si están vacíos o si los nuevos son más completos
+                cambios = []
+
+                if telefono_whatsapp and telefono_whatsapp != cliente_existente.telefono_whatsapp:
+                    cliente_existente.telefono_whatsapp = telefono_whatsapp
+                    cambios.append("teléfono")
+
+                if email and not cliente_existente.email:
+                    cliente_existente.email = email
+                    cambios.append("email")
+
+                if apellido and not cliente_existente.apellido:
+                    cliente_existente.apellido = apellido
+                    cambios.append("apellido")
+
+                if notas and not cliente_existente.notas:
+                    cliente_existente.notas = notas
+                    cambios.append("notas")
+
+                if cambios:
+                    mensaje += f" (actualizado: {', '.join(cambios)})"
+
+            return cliente_existente, False, mensaje
+
+        # Crear nuevo cliente
+        nuevo_cliente = cls(
+            usuario_id=usuario_id,
+            nombre=nombre,
+            apellido=apellido,
+            telefono_whatsapp=telefono_whatsapp,
+            email=email,
+            documento_identidad=documento_identidad,
+            notas=notas
+        )
+        db.session.add(nuevo_cliente)
+
+        return nuevo_cliente, True, "Cliente creado exitosamente"
 
     def __repr__(self):
         return f'<Cliente {self.nombre_completo}>'
@@ -910,7 +1190,7 @@ class PolizaCliente(db.Model):
             import json
             try:
                 return json.loads(self.coberturas)
-            except:
+            except (json.JSONDecodeError, TypeError):
                 return []
         return []
 
@@ -925,7 +1205,7 @@ class PolizaCliente(db.Model):
             import json
             try:
                 return json.loads(self.beneficiarios)
-            except:
+            except (json.JSONDecodeError, TypeError):
                 return []
         return []
 
@@ -939,6 +1219,89 @@ class PolizaCliente(db.Model):
         self.estado_confirmacion = 'definitivo'
         self.fecha_confirmacion = datetime.utcnow()
         self.confirmado_por = origen
+
+    def obtener_nombre_compania(self):
+        """
+        Obtiene el nombre de la compañía de múltiples fuentes.
+
+        Orden de prioridad:
+        1. poliza.compania.nombre (relación directa)
+        2. poliza.archivo.compania.nombre (a través del archivo)
+        3. poliza.archivo.nombre_compania_original (string guardado)
+        4. Extraer del nombre del archivo
+
+        Returns:
+            str: Nombre de la compañía o None si no se puede determinar
+        """
+        # 1. Compañía directa de la póliza
+        if self.compania:
+            return self.compania.nombre
+
+        # 2 y 3. A través del archivo descargado
+        if self.archivo:
+            # 2. Compañía del archivo
+            if self.archivo.compania:
+                return self.archivo.compania.nombre
+
+            # 3. Nombre original guardado
+            if self.archivo.nombre_compania_original:
+                return self.archivo.nombre_compania_original
+
+            # 4. Extraer del nombre del archivo
+            nombre_archivo = self.archivo.nombre_archivo
+            if nombre_archivo:
+                return self._extraer_compania_de_nombre(nombre_archivo)
+
+        return None
+
+    def _extraer_compania_de_nombre(self, nombre_archivo):
+        """
+        Intenta extraer el nombre de la compañía del nombre del archivo.
+
+        Los archivos suelen tener formato: COMPANIA_tipo_numero.pdf
+        Ejemplo: MERCANTIL_ANDINA_poliza_12345.pdf
+        """
+        import re
+
+        # Diccionario de patrones conocidos en nombres de archivo
+        PATRONES_COMPANIA = {
+            r'mercantil|lamercantil': 'Mercantil Andina',
+            r'liderar': 'Liderar',
+            r'rio.?uruguay|riouruguay': 'Río Uruguay',
+            r'berkley': 'Berkley',
+            r'mapfre': 'MAPFRE',
+            r'la.?caja|lacaja': 'La Caja',
+            r'sancor': 'Sancor',
+            r'allianz': 'Allianz',
+            r'zurich': 'Zurich',
+            r'sura': 'SURA',
+            r'la.?segunda|lasegunda': 'La Segunda',
+            r'provincia': 'Provincia Seguros',
+            r'san.?cristobal|sancristobal': 'San Cristóbal',
+            r'federacion|patronal': 'Federación Patronal',
+            r'triunfo': 'Triunfo',
+            r'integrity': 'Integrity',
+            r'orbis': 'Orbis',
+            r'rivadavia': 'Rivadavia',
+            r'experta': 'Experta',
+        }
+
+        nombre_lower = nombre_archivo.lower()
+
+        for patron, nombre_compania in PATRONES_COMPANIA.items():
+            if re.search(patron, nombre_lower):
+                return nombre_compania
+
+        # Si no coincide ningún patrón, intentar extraer la primera palabra
+        # antes de un guión bajo o número (heurística)
+        match = re.match(r'^([A-Za-z]+(?:_[A-Za-z]+)?)', nombre_archivo)
+        if match:
+            posible_compania = match.group(1).replace('_', ' ').title()
+            # Solo devolver si tiene más de 3 caracteres y parece un nombre
+            if len(posible_compania) > 3 and not posible_compania.isdigit():
+                return posible_compania
+
+        return None
 
     def __repr__(self):
         return f'<PolizaCliente {self.numero_poliza or self.id}>'
@@ -1046,7 +1409,7 @@ class PlantillaMensaje(db.Model):
 
         # Variables de la póliza
         if poliza:
-            mensaje = mensaje.replace('{compania}', poliza.compania.nombre if poliza.compania else '')
+            mensaje = mensaje.replace('{compania}', poliza.obtener_nombre_compania() or '')
             mensaje = mensaje.replace('{tipo_seguro}', poliza.tipo_seguro or '')
             mensaje = mensaje.replace('{numero_poliza}', poliza.numero_poliza or '')
             mensaje = mensaje.replace('{vigencia_desde}',
@@ -1464,6 +1827,188 @@ class HistorialEscaneoCarpeta(db.Model):
 
     def __repr__(self):
         return f'<HistorialEscaneoCarpeta {self.carpeta} - {self.ultima_fecha_escaneada}>'
+
+
+class RangoCobertura(db.Model):
+    """
+    Rastrea rangos de fechas que fueron escaneados para cada cuenta/carpeta.
+    Permite identificar gaps en la cobertura de escaneos.
+
+    Cuando un usuario escanea un rango de fechas, se registra aquí.
+    Si los rangos se solapan, se fusionan automáticamente.
+    """
+    __tablename__ = 'rangos_cobertura'
+
+    id = db.Column(db.Integer, primary_key=True)
+    cuenta_gmail_id = db.Column(db.Integer, db.ForeignKey('cuentas_gmail.id'), nullable=False)
+    carpeta = db.Column(db.String(100), nullable=False)
+    fecha_inicio = db.Column(db.Date, nullable=False)
+    fecha_fin = db.Column(db.Date, nullable=False)
+    escaneo_id = db.Column(db.Integer, db.ForeignKey('escaneos.id'), nullable=True)
+    fecha_creacion = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.Index('ix_cobertura_cuenta_carpeta', 'cuenta_gmail_id', 'carpeta'),
+    )
+
+    cuenta = db.relationship('CuentaGmail', backref=db.backref('rangos_cobertura', lazy='dynamic'))
+    escaneo = db.relationship('Escaneo', backref=db.backref('rangos_cobertura', lazy='dynamic'))
+
+    @staticmethod
+    def registrar_cobertura(cuenta_gmail_id, carpeta, fecha_inicio, fecha_fin, escaneo_id=None):
+        """
+        Registra un nuevo rango de cobertura y fusiona con rangos existentes si hay solapamiento.
+
+        Args:
+            cuenta_gmail_id: ID de la cuenta Gmail
+            carpeta: Nombre de la carpeta escaneada
+            fecha_inicio: Fecha de inicio del rango escaneado
+            fecha_fin: Fecha de fin del rango escaneado
+            escaneo_id: ID del escaneo que generó este rango (opcional)
+        """
+        from datetime import timedelta
+
+        if not fecha_inicio or not fecha_fin:
+            return None
+
+        # Asegurar que fecha_inicio <= fecha_fin
+        if fecha_inicio > fecha_fin:
+            fecha_inicio, fecha_fin = fecha_fin, fecha_inicio
+
+        # Buscar rangos existentes que se solapen o sean adyacentes
+        # Un rango se considera adyacente si está a 1 día de distancia
+        rangos_existentes = RangoCobertura.query.filter_by(
+            cuenta_gmail_id=cuenta_gmail_id,
+            carpeta=carpeta
+        ).order_by(RangoCobertura.fecha_inicio).all()
+
+        # Buscar rangos que se solapen o sean adyacentes al nuevo
+        rangos_a_fusionar = []
+        for rango in rangos_existentes:
+            # Verificar si hay solapamiento o adyacencia
+            # Solapamiento: rango.inicio <= nuevo.fin AND rango.fin >= nuevo.inicio
+            # Adyacencia: rango.fin + 1 día = nuevo.inicio OR nuevo.fin + 1 día = rango.inicio
+            if (rango.fecha_inicio <= fecha_fin + timedelta(days=1) and
+                rango.fecha_fin >= fecha_inicio - timedelta(days=1)):
+                rangos_a_fusionar.append(rango)
+
+        if rangos_a_fusionar:
+            # Fusionar todos los rangos encontrados con el nuevo
+            nuevo_inicio = min(fecha_inicio, min(r.fecha_inicio for r in rangos_a_fusionar))
+            nuevo_fin = max(fecha_fin, max(r.fecha_fin for r in rangos_a_fusionar))
+
+            # Eliminar los rangos que se van a fusionar
+            for rango in rangos_a_fusionar:
+                db.session.delete(rango)
+
+            # Crear el rango fusionado
+            rango_fusionado = RangoCobertura(
+                cuenta_gmail_id=cuenta_gmail_id,
+                carpeta=carpeta,
+                fecha_inicio=nuevo_inicio,
+                fecha_fin=nuevo_fin,
+                escaneo_id=escaneo_id
+            )
+            db.session.add(rango_fusionado)
+            return rango_fusionado
+        else:
+            # No hay solapamiento, crear nuevo rango
+            nuevo_rango = RangoCobertura(
+                cuenta_gmail_id=cuenta_gmail_id,
+                carpeta=carpeta,
+                fecha_inicio=fecha_inicio,
+                fecha_fin=fecha_fin,
+                escaneo_id=escaneo_id
+            )
+            db.session.add(nuevo_rango)
+            return nuevo_rango
+
+    @staticmethod
+    def obtener_cobertura(cuenta_gmail_id, carpeta=None):
+        """
+        Obtiene todos los rangos de cobertura para una cuenta.
+
+        Args:
+            cuenta_gmail_id: ID de la cuenta Gmail
+            carpeta: Filtrar por carpeta específica (opcional)
+
+        Returns:
+            Lista de rangos ordenados por fecha de inicio
+        """
+        query = RangoCobertura.query.filter_by(cuenta_gmail_id=cuenta_gmail_id)
+        if carpeta:
+            query = query.filter_by(carpeta=carpeta)
+        return query.order_by(RangoCobertura.fecha_inicio).all()
+
+    @staticmethod
+    def obtener_gaps(cuenta_gmail_id, carpeta, fecha_ref_inicio=None, fecha_ref_fin=None):
+        """
+        Calcula las ventanas de tiempo no observadas (gaps) entre rangos escaneados.
+
+        Args:
+            cuenta_gmail_id: ID de la cuenta Gmail
+            carpeta: Nombre de la carpeta
+            fecha_ref_inicio: Fecha de referencia inicial (opcional, para limitar el rango de búsqueda)
+            fecha_ref_fin: Fecha de referencia final (opcional)
+
+        Returns:
+            Lista de tuplas (fecha_inicio_gap, fecha_fin_gap) representando los períodos no escaneados
+        """
+        from datetime import timedelta
+
+        rangos = RangoCobertura.obtener_cobertura(cuenta_gmail_id, carpeta)
+
+        if not rangos:
+            # Si no hay rangos, todo el período de referencia es un gap
+            if fecha_ref_inicio and fecha_ref_fin:
+                return [(fecha_ref_inicio, fecha_ref_fin)]
+            return []
+
+        gaps = []
+
+        # Gap inicial (antes del primer rango)
+        if fecha_ref_inicio and rangos[0].fecha_inicio > fecha_ref_inicio:
+            gaps.append((fecha_ref_inicio, rangos[0].fecha_inicio - timedelta(days=1)))
+
+        # Gaps entre rangos consecutivos
+        for i in range(len(rangos) - 1):
+            fin_actual = rangos[i].fecha_fin
+            inicio_siguiente = rangos[i + 1].fecha_inicio
+
+            # Si hay más de 1 día entre el fin de uno y el inicio del siguiente
+            if (inicio_siguiente - fin_actual).days > 1:
+                gap_inicio = fin_actual + timedelta(days=1)
+                gap_fin = inicio_siguiente - timedelta(days=1)
+                gaps.append((gap_inicio, gap_fin))
+
+        # Gap final (después del último rango)
+        if fecha_ref_fin and rangos[-1].fecha_fin < fecha_ref_fin:
+            gaps.append((rangos[-1].fecha_fin + timedelta(days=1), fecha_ref_fin))
+
+        return gaps
+
+    @staticmethod
+    def obtener_resumen_cobertura(cuenta_gmail_id):
+        """
+        Obtiene un resumen de cobertura por carpeta.
+
+        Returns:
+            Dict con estructura: {carpeta: [(fecha_inicio, fecha_fin), ...]}
+        """
+        rangos = RangoCobertura.query.filter_by(
+            cuenta_gmail_id=cuenta_gmail_id
+        ).order_by(RangoCobertura.carpeta, RangoCobertura.fecha_inicio).all()
+
+        resumen = {}
+        for rango in rangos:
+            if rango.carpeta not in resumen:
+                resumen[rango.carpeta] = []
+            resumen[rango.carpeta].append((rango.fecha_inicio, rango.fecha_fin))
+
+        return resumen
+
+    def __repr__(self):
+        return f'<RangoCobertura {self.carpeta}: {self.fecha_inicio} - {self.fecha_fin}>'
 
 
 class Siniestro(db.Model):

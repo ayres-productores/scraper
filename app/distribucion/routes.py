@@ -2,13 +2,16 @@
 Rutas del módulo de distribución de pólizas
 """
 
-import os
-from flask import (Blueprint, render_template, redirect, url_for, flash,
-                   request, jsonify, current_app, Response)
 import json
+import logging
+import os
+import threading
 import time
 import uuid
-import threading
+from flask import (Blueprint, render_template, redirect, url_for, flash,
+                   request, jsonify, current_app, Response)
+
+logger = logging.getLogger('app.distribucion.routes')
 from flask_login import login_required, current_user
 from app import db
 from app.models import (Cliente, PolizaCliente, EnvioWhatsApp, PlantillaMensaje,
@@ -27,10 +30,52 @@ import requests
 
 distribucion_bp = Blueprint('distribucion', __name__)
 
-# Almacenamiento de progreso para análisis en lote (en memoria)
-# Estructura: {task_id: {status, total, procesados, errores, actual, log, finalizado}}
-_progreso_analisis = {}
+# ============================================================================
+# ALMACENAMIENTO THREAD-SAFE PARA PROGRESO DE ANÁLISIS
+# ============================================================================
+# Migrado a app.utils.task_progress para mejor gestión de memoria y TTL.
+# Se mantiene interfaz compatible para código existente.
+from app.utils.task_progress import task_store
+
+# Lock global para compatibilidad (task_store tiene su propio lock interno)
 _progreso_lock = threading.Lock()
+
+
+class _ProgresoAnalisisProxy:
+    """
+    Proxy que provee interfaz de diccionario sobre task_store.
+    Mantiene compatibilidad con código existente mientras usa
+    el almacenamiento thread-safe mejorado.
+    """
+
+    def __getitem__(self, task_id):
+        result = task_store.get(task_id)
+        if result is None:
+            raise KeyError(task_id)
+        return result
+
+    def __setitem__(self, task_id, value):
+        if task_store.exists(task_id):
+            # Actualizar tarea existente
+            task_store.update(task_id, **value)
+        else:
+            # Crear nueva tarea
+            value['type'] = 'analisis_pdf'
+            task_store.create(task_id, value)
+
+    def __delitem__(self, task_id):
+        task_store.delete(task_id)
+
+    def __contains__(self, task_id):
+        return task_store.exists(task_id)
+
+    def get(self, task_id, default=None):
+        result = task_store.get(task_id)
+        return result if result is not None else default
+
+
+# Instancia proxy para compatibilidad
+_progreso_analisis = _ProgresoAnalisisProxy()
 
 
 def sincronizar_sesion_whatsapp(usuario_id):
@@ -217,11 +262,12 @@ def clientes():
 @distribucion_bp.route('/clientes/nuevo', methods=['GET', 'POST'])
 @login_required
 def nuevo_cliente():
-    """Crear nuevo cliente."""
+    """Crear nuevo cliente (unifica si existe con mismo documento)."""
     form = ClienteForm()
 
     if form.validate_on_submit():
-        cliente = Cliente(
+        # Usar método que unifica por documento
+        cliente, es_nuevo, mensaje = Cliente.obtener_o_crear(
             usuario_id=current_user.id,
             nombre=form.nombre.data,
             apellido=form.apellido.data,
@@ -229,19 +275,30 @@ def nuevo_cliente():
             email=form.email.data,
             documento_identidad=form.documento_identidad.data,
             notas=form.notas.data,
-            usar_mensaje_estandar=form.usar_mensaje_estandar.data,
-            mensaje_personalizado=form.mensaje_personalizado.data if not form.usar_mensaje_estandar.data else None
+            actualizar_existente=True
         )
-        db.session.add(cliente)
+
+        # Configurar mensaje personalizado (no está en obtener_o_crear)
+        cliente.usar_mensaje_estandar = form.usar_mensaje_estandar.data
+        cliente.mensaje_personalizado = form.mensaje_personalizado.data if not form.usar_mensaje_estandar.data else None
+
         db.session.commit()
 
-        LogActividad.registrar(
-            current_user.id, 'cliente_creado',
-            f'Cliente creado: {cliente.nombre_completo}',
-            request
-        )
+        if es_nuevo:
+            LogActividad.registrar(
+                current_user.id, 'cliente_creado',
+                f'Cliente creado: {cliente.nombre_completo}',
+                request
+            )
+            flash('Cliente creado correctamente.', 'success')
+        else:
+            LogActividad.registrar(
+                current_user.id, 'cliente_unificado',
+                f'Cliente unificado por documento: {cliente.nombre_completo}',
+                request
+            )
+            flash(f'Se encontró cliente existente con el mismo documento. {mensaje}', 'info')
 
-        flash('Cliente creado correctamente.', 'success')
         return redirect(url_for('distribucion.cliente_detalle', cliente_id=cliente.id))
 
     return render_template('distribucion/cliente_form.html', form=form, titulo='Nuevo Cliente')
@@ -394,7 +451,7 @@ def asignar_poliza():
     """Asignar póliza a cliente."""
     form = AsignarPolizaForm()
 
-    # Cargar opciones de clientes
+    # Cargar opciones de clientes del usuario actual
     clientes = Cliente.query.filter_by(activo=True).order_by(Cliente.nombre).all()
     form.cliente_id.choices = [(0, 'Seleccionar cliente...')] + [
         (c.id, c.nombre_completo) for c in clientes
@@ -599,7 +656,7 @@ def api_cliente_polizas(cliente_id):
             'id': poliza.id,
             'numero_poliza': poliza.numero_poliza or f'Póliza #{poliza.id}',
             'tipo_seguro': poliza.tipo_seguro or 'Sin tipo',
-            'compania': poliza.compania.nombre if poliza.compania else 'Sin compañía',
+            'compania': poliza.obtener_nombre_compania() or 'Sin compañía',
             'fecha_vigencia_hasta': poliza.fecha_vigencia_hasta.strftime('%d/%m/%Y') if poliza.fecha_vigencia_hasta else 'Sin fecha',
             'tiene_pdf': tiene_pdf,
             'esta_vigente': esta_vigente
@@ -765,8 +822,9 @@ def whatsapp_enviar_mensaje():
                         )
                         if resp.status_code == 200 and resp.json().get('success'):
                             pdfs_enviados += 1
-                    except:
-                        pass  # Continuar con los demás si uno falla
+                    except Exception as e:
+                        logger.warning(f"Error enviando PDF adicional: {e}")
+                        # Continuar con los demás si uno falla
             else:
                 return jsonify({
                     'success': False,
@@ -1172,7 +1230,6 @@ def crm_dashboard():
 
     # Clientes a reactivar
     clientes_a_reactivar = Cliente.query.filter_by(
-        usuario_id=current_user.id,
         activo=True,
         es_cliente_actual=False
     ).count()
@@ -1826,8 +1883,8 @@ def editar_siniestro(siniestro_id):
         try:
             terceros = json.loads(siniestro.terceros_involucrados)
             form.terceros_texto.data = '\n'.join([f"{t.get('nombre', '')} - {t.get('telefono', '')}" for t in terceros])
-        except:
-            pass
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            pass  # JSON inválido o formato inesperado, usar valor vacío
 
     if form.validate_on_submit():
         siniestro.numero_siniestro = form.numero_siniestro.data
@@ -1926,7 +1983,7 @@ def interprete_pdf():
         'requieren_revision': sum(1 for p in procesados if p['poliza'].requiere_revision)
     }
 
-    # Obtener todos los clientes activos (visibles para todos los usuarios)
+    # Obtener clientes activos del usuario actual
     clientes = Cliente.query.filter_by(activo=True).order_by(Cliente.nombre).all()
 
     return render_template('distribucion/interprete_pdf.html',
@@ -1964,7 +2021,7 @@ def extraer_pdf(archivo_id):
     else:
         error_extraccion = "Archivo no encontrado en el sistema"
 
-    # Obtener clientes para asignar
+    # Obtener clientes del usuario para asignar
     clientes = Cliente.query.filter_by(activo=True).order_by(Cliente.nombre).all()
 
     # Obtener compañías
@@ -2007,8 +2064,8 @@ def guardar_extraccion(archivo_id):
         flash('Debe seleccionar un cliente.', 'warning')
         return redirect(url_for('distribucion.extraer_pdf', archivo_id=archivo_id))
 
-    # Verificar que el cliente pertenece al usuario
-    cliente = Cliente.query.filter_by(id=cliente_id, usuario_id=current_user.id).first()
+    # Verificar que el cliente existe y está activo
+    cliente = Cliente.query.filter_by(id=cliente_id, activo=True).first()
     if not cliente:
         flash('Cliente no válido.', 'danger')
         return redirect(url_for('distribucion.extraer_pdf', archivo_id=archivo_id))
@@ -2019,7 +2076,7 @@ def guardar_extraccion(archivo_id):
             return None
         try:
             return datetime.strptime(valor, '%Y-%m-%d').date()
-        except:
+        except (ValueError, TypeError):
             return None
 
     # Parsear decimales
@@ -2028,7 +2085,7 @@ def guardar_extraccion(archivo_id):
             return None
         try:
             return float(valor.replace(',', '.'))
-        except:
+        except (ValueError, TypeError, AttributeError):
             return None
 
     # Parsear entero
@@ -2037,7 +2094,7 @@ def guardar_extraccion(archivo_id):
             return None
         try:
             return int(valor)
-        except:
+        except (ValueError, TypeError):
             return None
 
     # Datos a guardar
@@ -2135,7 +2192,7 @@ def procesar_lote_pdf():
         flash('Debe seleccionar al menos un archivo.', 'warning')
         return redirect(url_for('distribucion.interprete_pdf'))
 
-    cliente = Cliente.query.filter_by(id=cliente_id, usuario_id=current_user.id).first()
+    cliente = Cliente.query.filter_by(id=cliente_id, activo=True).first()
     if not cliente:
         flash('Cliente no válido.', 'danger')
         return redirect(url_for('distribucion.interprete_pdf'))
@@ -2243,7 +2300,7 @@ def asignar_poliza_inteligente():
         PolizaCliente.id == None
     ).order_by(ArchivoDescargado.fecha_descarga.desc()).all()
 
-    # Obtener clientes activos
+    # Obtener clientes activos del usuario
     clientes = Cliente.query.filter_by(activo=True).order_by(Cliente.nombre).all()
 
     # Obtener companias
@@ -2384,7 +2441,7 @@ def guardar_asignacion_inteligente():
     cliente = None
 
     if crear_cliente:
-        # Crear nuevo cliente con los datos del formulario
+        # Crear nuevo cliente con los datos del formulario (unifica si existe)
         nombre_completo = request.form.get('cliente_nombre', '').strip()
         telefono = request.form.get('telefono_whatsapp', '').strip()
 
@@ -2404,16 +2461,20 @@ def guardar_asignacion_inteligente():
             nombre = partes[0].strip()
             apellido = partes[1].strip() if len(partes) > 1 else ''
 
-        cliente = Cliente(
+        # Usar método que unifica por documento
+        cliente, es_nuevo, mensaje = Cliente.obtener_o_crear(
             usuario_id=current_user.id,
             nombre=nombre,
             apellido=apellido,
             telefono_whatsapp=telefono,
             email=request.form.get('cliente_email'),
             documento_identidad=request.form.get('cliente_documento'),
-            usar_mensaje_estandar=True
+            actualizar_existente=True
         )
-        db.session.add(cliente)
+        if es_nuevo:
+            cliente.usar_mensaje_estandar = True
+        else:
+            flash(f'Se encontró cliente existente con el mismo documento. {mensaje}', 'info')
         db.session.flush()  # Para obtener el ID
 
     else:
@@ -2422,7 +2483,7 @@ def guardar_asignacion_inteligente():
             flash('Debe seleccionar un cliente.', 'warning')
             return redirect(url_for('distribucion.asignar_poliza_inteligente'))
 
-        cliente = Cliente.query.filter_by(id=cliente_id, usuario_id=current_user.id).first()
+        cliente = Cliente.query.filter_by(id=cliente_id, activo=True).first()
         if not cliente:
             flash('Cliente no valido.', 'danger')
             return redirect(url_for('distribucion.asignar_poliza_inteligente'))
@@ -2439,7 +2500,7 @@ def guardar_asignacion_inteligente():
             return None
         try:
             return datetime.strptime(valor, '%Y-%m-%d').date()
-        except:
+        except (ValueError, TypeError):
             return None
 
     def parsear_decimal(valor):
@@ -2447,7 +2508,7 @@ def guardar_asignacion_inteligente():
             return None
         try:
             return float(str(valor).replace(',', '.'))
-        except:
+        except (ValueError, TypeError, AttributeError):
             return None
 
     def parsear_int(valor):
@@ -2455,7 +2516,7 @@ def guardar_asignacion_inteligente():
             return None
         try:
             return int(valor)
-        except:
+        except (ValueError, TypeError):
             return None
 
     # Crear poliza con todos los datos
@@ -2591,11 +2652,12 @@ def api_vista_previa_pdf(archivo_id):
 @distribucion_bp.route('/api/crear-cliente-rapido', methods=['POST'])
 @login_required
 def api_crear_cliente_rapido():
-    """Crea un cliente rapidamente desde el formulario de asignacion."""
+    """Crea un cliente rapidamente desde el formulario de asignacion (unifica si existe)."""
     data = request.get_json()
 
     nombre = data.get('nombre', '').strip()
     telefono = data.get('telefono', '').strip()
+    documento = data.get('documento', '').strip() or data.get('documento_identidad', '').strip() or None
 
     if not nombre:
         return jsonify({'exito': False, 'error': 'El nombre es requerido'}), 400
@@ -2605,25 +2667,31 @@ def api_crear_cliente_rapido():
     nombre_cliente = partes[0]
     apellido_cliente = partes[1] if len(partes) > 1 else ''
 
-    cliente = Cliente(
+    # Usar método que unifica por documento
+    cliente, es_nuevo, mensaje = Cliente.obtener_o_crear(
         usuario_id=current_user.id,
         nombre=nombre_cliente,
         apellido=apellido_cliente,
         telefono_whatsapp=telefono or None,
-        usar_mensaje_estandar=True
+        documento_identidad=documento,
+        actualizar_existente=True
     )
 
-    db.session.add(cliente)
+    if es_nuevo:
+        cliente.usar_mensaje_estandar = True
+
     db.session.commit()
 
     LogActividad.registrar(
-        current_user.id, 'cliente_creado_rapido',
-        f'Cliente creado rapidamente: {cliente.nombre_completo}',
+        current_user.id, 'cliente_creado_rapido' if es_nuevo else 'cliente_unificado',
+        f'Cliente {"creado" if es_nuevo else "unificado"}: {cliente.nombre_completo}',
         request
     )
 
     return jsonify({
         'exito': True,
+        'es_nuevo': es_nuevo,
+        'mensaje': mensaje,
         'cliente': {
             'id': cliente.id,
             'nombre': cliente.nombre_completo
@@ -2888,14 +2956,14 @@ def analisis_pdf():
         try:
             desde = datetime.strptime(fecha_desde, '%Y-%m-%d')
             query = query.filter(RegistroAnalisisPDF.fecha_correo >= desde)
-        except:
-            pass
+        except (ValueError, TypeError):
+            pass  # Fecha inválida, ignorar filtro
     if fecha_hasta:
         try:
             hasta = datetime.strptime(fecha_hasta, '%Y-%m-%d')
             query = query.filter(RegistroAnalisisPDF.fecha_correo <= hasta)
-        except:
-            pass
+        except (ValueError, TypeError):
+            pass  # Fecha inválida, ignorar filtro
 
     # Filtro de solo pólizas vigentes (fecha_vigencia_hasta >= hoy)
     if solo_vigentes:
@@ -3028,7 +3096,7 @@ def procesar_pdf(archivo_id):
         registro.marcar_error(notas=error_extraccion)
         db.session.commit()
 
-    # Obtener clientes para selector
+    # Obtener clientes activos para selector
     clientes = Cliente.query.filter_by(activo=True).order_by(Cliente.nombre).all()
 
     # Obtener siguiente archivo pendiente
@@ -3070,69 +3138,93 @@ def guardar_analisis_pdf(archivo_id):
         cliente_id = request.form.get('cliente_id', type=int)
         crear_cliente = request.form.get('crear_cliente') == '1'
         cliente_nuevo = False
+        nuevo_cliente = None
 
         # Crear cliente nuevo si se solicitó
         if crear_cliente:
-            nuevo_cliente = Cliente(
-                usuario_id=current_user.id,
-                nombre=request.form.get('cliente_nombre', 'Sin nombre'),
-                apellido=request.form.get('cliente_apellido', ''),
-                telefono_whatsapp=request.form.get('cliente_telefono', ''),
-                email=request.form.get('cliente_email', ''),
-                documento_identidad=request.form.get('cliente_documento', ''),
-            )
-            db.session.add(nuevo_cliente)
-            db.session.flush()
-            cliente_id = nuevo_cliente.id
-            cliente_nuevo = True
+            # Validar campos requeridos
+            cliente_nombre = request.form.get('cliente_nombre', '').strip()
+            cliente_telefono = request.form.get('cliente_telefono', '').strip()
+
+            if not cliente_nombre:
+                flash('El nombre del cliente es requerido.', 'danger')
+                return redirect(url_for('distribucion.procesar_pdf', archivo_id=archivo_id))
+
+            if not cliente_telefono:
+                flash('El teléfono WhatsApp del cliente es requerido.', 'danger')
+                return redirect(url_for('distribucion.procesar_pdf', archivo_id=archivo_id))
+
+            try:
+                # Usar método unificado que busca por documento y crea si no existe
+                nuevo_cliente, cliente_nuevo, _ = Cliente.obtener_o_crear(
+                    usuario_id=current_user.id,
+                    nombre=cliente_nombre,
+                    apellido=request.form.get('cliente_apellido', '').strip(),
+                    telefono_whatsapp=cliente_telefono,
+                    email=request.form.get('cliente_email', '').strip(),
+                    documento_identidad=request.form.get('cliente_documento', '').strip(),
+                    actualizar_existente=True
+                )
+                db.session.flush()
+                cliente_id = nuevo_cliente.id
+            except Exception as e:
+                db.session.rollback()
+                flash(f'Error al crear cliente: {str(e)}', 'danger')
+                return redirect(url_for('distribucion.procesar_pdf', archivo_id=archivo_id))
 
         if not cliente_id:
             flash('Debe seleccionar o crear un cliente.', 'danger')
             return redirect(url_for('distribucion.procesar_pdf', archivo_id=archivo_id))
 
-        # Crear póliza
-        poliza = PolizaCliente(
-            cliente_id=cliente_id,
-            archivo_id=archivo.id,
-            numero_poliza=request.form.get('numero_poliza', ''),
-            tipo_seguro=request.form.get('tipo_seguro', 'otro'),
-            fecha_vigencia_desde=datetime.strptime(request.form.get('fecha_desde'), '%Y-%m-%d').date() if request.form.get('fecha_desde') else None,
-            fecha_vigencia_hasta=datetime.strptime(request.form.get('fecha_hasta'), '%Y-%m-%d').date() if request.form.get('fecha_hasta') else None,
-            prima_anual=request.form.get('prima', type=float),
-            asegurado_nombre=request.form.get('asegurado_nombre', ''),
-            asegurado_documento=request.form.get('asegurado_documento', ''),
-            vehiculo_marca=request.form.get('vehiculo_marca', ''),
-            vehiculo_modelo=request.form.get('vehiculo_modelo', ''),
-            vehiculo_patente=request.form.get('vehiculo_patente', ''),
-            vehiculo_anio=request.form.get('vehiculo_anio', type=int),
-            estado='vigente',
-            datos_extraidos=registro.datos_extraidos,
-            confianza_extraccion=registro.confianza_extraccion,
-            fecha_extraccion=datetime.utcnow()
-        )
-        db.session.add(poliza)
-        db.session.flush()
+        try:
+            # Crear póliza
+            poliza = PolizaCliente(
+                cliente_id=cliente_id,
+                archivo_id=archivo.id,
+                numero_poliza=request.form.get('numero_poliza', ''),
+                tipo_seguro=request.form.get('tipo_seguro', 'otro'),
+                fecha_vigencia_desde=datetime.strptime(request.form.get('fecha_desde'), '%Y-%m-%d').date() if request.form.get('fecha_desde') else None,
+                fecha_vigencia_hasta=datetime.strptime(request.form.get('fecha_hasta'), '%Y-%m-%d').date() if request.form.get('fecha_hasta') else None,
+                prima_anual=request.form.get('prima', type=float),
+                asegurado_nombre=request.form.get('asegurado_nombre', ''),
+                asegurado_documento=request.form.get('asegurado_documento', ''),
+                vehiculo_marca=request.form.get('vehiculo_marca', ''),
+                vehiculo_modelo=request.form.get('vehiculo_modelo', ''),
+                vehiculo_patente=request.form.get('vehiculo_patente', ''),
+                vehiculo_anio=request.form.get('vehiculo_anio', type=int),
+                estado='vigente',
+                datos_extraidos=registro.datos_extraidos,
+                confianza_extraccion=registro.confianza_extraccion,
+                fecha_extraccion=datetime.utcnow()
+            )
+            db.session.add(poliza)
+            db.session.flush()
 
-        # Actualizar registro
-        registro.marcar_procesado(
-            cliente_id=cliente_id,
-            poliza_id=poliza.id,
-            cliente_nuevo=cliente_nuevo,
-            poliza_nueva=True,
-            usuario_id=current_user.id
-        )
-        db.session.commit()
+            # Actualizar registro
+            registro.marcar_procesado(
+                cliente_id=cliente_id,
+                poliza_id=poliza.id,
+                cliente_nuevo=cliente_nuevo,
+                poliza_nueva=True,
+                usuario_id=current_user.id
+            )
+            db.session.commit()
 
-        LogActividad.registrar(
-            current_user.id,
-            'analisis_pdf_procesado',
-            f'PDF {archivo.id_documento} procesado. Cliente: {cliente_id}, Póliza: {poliza.id}',
-            request
-        )
+            LogActividad.registrar(
+                current_user.id,
+                'analisis_pdf_procesado',
+                f'PDF {archivo.id_documento} procesado. Cliente: {cliente_id}, Póliza: {poliza.id}',
+                request
+            )
 
-        if cliente_nuevo:
-            flash(f'Cliente "{nuevo_cliente.nombre_completo}" creado exitosamente.', 'success')
-        flash(f'Póliza creada exitosamente (ID: {poliza.id}).', 'success')
+            if cliente_nuevo and nuevo_cliente:
+                flash(f'Cliente "{nuevo_cliente.nombre_completo}" creado exitosamente.', 'success')
+            flash(f'Póliza creada exitosamente (ID: {poliza.id}).', 'success')
+
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error al crear póliza: {str(e)}', 'danger')
+            return redirect(url_for('distribucion.procesar_pdf', archivo_id=archivo_id))
 
     # Redirigir
     if continuar:
@@ -3154,17 +3246,17 @@ def analisis_lote():
     """Inicia el análisis en lote y retorna task_id para seguimiento SSE."""
     task_id = str(uuid.uuid4())
 
-    # Inicializar estado de progreso
-    with _progreso_lock:
-        _progreso_analisis[task_id] = {
-            'status': 'iniciando',
-            'total': 0,
-            'procesados': 0,
-            'errores': 0,
-            'actual': None,
-            'log': [],
-            'finalizado': False
-        }
+    # Inicializar estado de progreso usando task_store thread-safe
+    task_store.create(task_id, {
+        'type': 'analisis_pdf',
+        'status': 'iniciando',
+        'total': 0,
+        'procesados': 0,
+        'errores': 0,
+        'actual': None,
+        'log': [],
+        'finalizado': False
+    })
 
     # Iniciar procesamiento en hilo separado
     from flask import current_app
@@ -3212,16 +3304,15 @@ def _ejecutar_analisis_lote(app, task_id):
             ).limit(50).all()]
             total = len(pendientes_ids)
 
-            with _progreso_lock:
-                _progreso_analisis[task_id]['total'] = total
-                _progreso_analisis[task_id]['status'] = 'procesando'
-                if total == 0:
-                    _progreso_analisis[task_id]['log'].append({
-                        'tipo': 'info',
-                        'mensaje': 'No hay PDFs pendientes para analizar'
-                    })
-                    _progreso_analisis[task_id]['finalizado'] = True
-                    return
+            # Actualizar progreso usando task_store thread-safe
+            task_store.update(task_id, total=total, status='procesando')
+            if total == 0:
+                task_store.append_log(task_id, {
+                    'tipo': 'info',
+                    'mensaje': 'No hay PDFs pendientes para analizar'
+                })
+                task_store.update(task_id, finalizado=True)
+                return
 
             analizados = 0
             errores = 0
@@ -3236,12 +3327,11 @@ def _ejecutar_analisis_lote(app, task_id):
                 nombre_archivo = archivo.nombre_archivo if archivo else f'Registro {registro.id}'
 
                 # Actualizar archivo actual
-                with _progreso_lock:
-                    _progreso_analisis[task_id]['actual'] = {
-                        'indice': i + 1,
-                        'nombre': nombre_archivo[:50],
-                        'id': registro.archivo_id
-                    }
+                task_store.update(task_id, actual={
+                    'indice': i + 1,
+                    'nombre': nombre_archivo[:50],
+                    'id': registro.archivo_id
+                })
 
                 try:
                     if archivo and os.path.exists(archivo.ruta_archivo):
@@ -3263,22 +3353,20 @@ def _ejecutar_analisis_lote(app, task_id):
                         _commit_con_reintentos()
                         analizados += 1
 
-                        with _progreso_lock:
-                            _progreso_analisis[task_id]['procesados'] = analizados
-                            _progreso_analisis[task_id]['log'].append({
-                                'tipo': 'exito',
-                                'mensaje': f'{nombre_archivo[:40]} - {resumen.get("compania", "?")} ({int(resumen.get("confianza", 0)*100)}%)'
-                            })
+                        task_store.update(task_id, procesados=analizados)
+                        task_store.append_log(task_id, {
+                            'tipo': 'exito',
+                            'mensaje': f'{nombre_archivo[:40]} - {resumen.get("compania", "?")} ({int(resumen.get("confianza", 0)*100)}%)'
+                        })
                     else:
                         registro.marcar_error('Archivo no encontrado')
                         _commit_con_reintentos()
                         errores += 1
-                        with _progreso_lock:
-                            _progreso_analisis[task_id]['errores'] = errores
-                            _progreso_analisis[task_id]['log'].append({
-                                'tipo': 'error',
-                                'mensaje': f'{nombre_archivo[:40]} - Archivo no encontrado'
-                            })
+                        task_store.update(task_id, errores=errores)
+                        task_store.append_log(task_id, {
+                            'tipo': 'error',
+                            'mensaje': f'{nombre_archivo[:40]} - Archivo no encontrado'
+                        })
                 except Exception as e:
                     db.session.rollback()
                     try:
@@ -3286,37 +3374,32 @@ def _ejecutar_analisis_lote(app, task_id):
                         if registro:
                             registro.marcar_error(str(e)[:200])
                             _commit_con_reintentos()
-                    except:
-                        pass
+                    except Exception as e_inner:
+                        logger.warning(f"Error marcando registro {registro_id} como fallido: {e_inner}")
                     errores += 1
-                    with _progreso_lock:
-                        _progreso_analisis[task_id]['errores'] = errores
-                        _progreso_analisis[task_id]['log'].append({
-                            'tipo': 'error',
-                            'mensaje': f'{nombre_archivo[:40]} - {str(e)[:50]}'
-                        })
+                    task_store.update(task_id, errores=errores)
+                    task_store.append_log(task_id, {
+                        'tipo': 'error',
+                        'mensaje': f'{nombre_archivo[:40]} - {str(e)[:50]}'
+                    })
 
                 # Pequeña pausa entre archivos para reducir contención
                 time.sleep(0.1)
 
             # Marcar como finalizado
-            with _progreso_lock:
-                _progreso_analisis[task_id]['status'] = 'completado'
-                _progreso_analisis[task_id]['finalizado'] = True
-                _progreso_analisis[task_id]['log'].append({
-                    'tipo': 'info',
-                    'mensaje': f'Completado: {analizados} analizados, {errores} errores'
-                })
+            task_store.update(task_id, status='completado', finalizado=True)
+            task_store.append_log(task_id, {
+                'tipo': 'info',
+                'mensaje': f'Completado: {analizados} analizados, {errores} errores'
+            })
 
         except Exception as e:
             db.session.rollback()
-            with _progreso_lock:
-                _progreso_analisis[task_id]['status'] = 'error'
-                _progreso_analisis[task_id]['finalizado'] = True
-                _progreso_analisis[task_id]['log'].append({
-                    'tipo': 'error',
-                    'mensaje': f'Error general: {str(e)[:100]}'
-                })
+            task_store.update(task_id, status='error', finalizado=True)
+            task_store.append_log(task_id, {
+                'tipo': 'error',
+                'mensaje': f'Error general: {str(e)[:100]}'
+            })
         finally:
             db.session.remove()
 
@@ -3330,35 +3413,35 @@ def analisis_progreso_stream(task_id):
         ultimo_log_idx = 0
 
         while True:
-            with _progreso_lock:
-                progreso = _progreso_analisis.get(task_id)
+            # Usar task_store thread-safe
+            progreso = task_store.get(task_id)
 
             if not progreso:
                 yield f"data: {json.dumps({'error': 'Tarea no encontrada'})}\n\n"
                 break
 
             # Preparar datos para enviar
-            nuevos_logs = progreso['log'][ultimo_log_idx:]
-            ultimo_log_idx = len(progreso['log'])
+            log_list = progreso.get('log', [])
+            nuevos_logs = log_list[ultimo_log_idx:]
+            ultimo_log_idx = len(log_list)
 
             evento = {
-                'status': progreso['status'],
-                'total': progreso['total'],
-                'procesados': progreso['procesados'],
-                'errores': progreso['errores'],
-                'actual': progreso['actual'],
+                'status': progreso.get('status', 'desconocido'),
+                'total': progreso.get('total', 0),
+                'procesados': progreso.get('procesados', 0),
+                'errores': progreso.get('errores', 0),
+                'actual': progreso.get('actual'),
                 'nuevos_logs': nuevos_logs,
-                'finalizado': progreso['finalizado']
+                'finalizado': progreso.get('finalizado', False)
             }
 
             yield f"data: {json.dumps(evento, ensure_ascii=False)}\n\n"
 
-            if progreso['finalizado']:
+            if progreso.get('finalizado'):
                 # Limpiar progreso después de un delay
+                # task_store tiene TTL automático, pero limpiamos manualmente para liberar memoria
                 time.sleep(1)
-                with _progreso_lock:
-                    if task_id in _progreso_analisis:
-                        del _progreso_analisis[task_id]
+                task_store.delete(task_id)
                 break
 
             time.sleep(0.5)  # Actualizar cada 500ms

@@ -97,7 +97,7 @@ class EstrategiaEnlaceHTML(EstrategiaExtraccion):
                     charset = parte.get_content_charset() or 'utf-8'
                     try:
                         return payload.decode(charset, errors='replace')
-                    except:
+                    except (LookupError, UnicodeDecodeError):
                         return payload.decode('utf-8', errors='replace')
         return None
 

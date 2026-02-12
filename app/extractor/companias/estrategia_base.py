@@ -197,8 +197,8 @@ class EstrategiaExtraccion(ABC):
         finally:
             try:
                 os.unlink(tmp_path)
-            except:
-                pass
+            except OSError:
+                pass  # Archivo temporal ya eliminado o inaccesible
 
     def generar_nombre_archivo(self, datos: Dict, fecha_correo: datetime,
                                remitente: str = '', asunto: str = '') -> str:
