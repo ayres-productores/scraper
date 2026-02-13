@@ -3,10 +3,12 @@ Servicio para buscar clientes existentes basándose en datos extraídos del PDF.
 
 Este módulo permite detectar si un PDF corresponde a un cliente existente
 al momento del escaneo, antes de que el usuario procese manualmente el PDF.
+
+Usa DatabaseGateway para acceso thread-safe a la base de datos.
 """
 
 import logging
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 from difflib import SequenceMatcher
 
 logger = logging.getLogger(__name__)
@@ -19,26 +21,37 @@ class ClienteMatcher:
     La búsqueda sigue esta prioridad:
     1. Match por documento (exacto) → confianza 1.0
     2. Match por nombre (fuzzy > 0.75) → confianza = ratio
+
+    Usa DatabaseGateway internamente para garantizar thread-safety
+    y manejo automático de errores de BD.
     """
 
-    def __init__(self, db_session=None):
+    def __init__(self, db_session=None, app=None):
         """
         Inicializa el matcher.
 
         Args:
-            db_session: Sesión de SQLAlchemy opcional.
-                        Si no se proporciona, usa db.session de Flask.
+            db_session: Sesión de SQLAlchemy opcional (legacy).
+                        Si no se proporciona, usa DatabaseGateway.
+            app: Flask app para threads background.
         """
         self._db_session = db_session
+        self._app = app
+        self._use_gateway = db_session is None
 
     @property
     def session(self):
-        """Obtiene la sesión de base de datos apropiada."""
+        """Obtiene la sesión de base de datos (legacy, para compatibilidad)."""
         if self._db_session:
             return self._db_session
         # Fallback a sesión de Flask
         from app import db
         return db.session
+
+    def _get_gateway(self):
+        """Obtiene el gateway de base de datos."""
+        from app.utils.database_gateway import db_gateway
+        return db_gateway
 
     def buscar_cliente(
         self,
@@ -87,6 +100,7 @@ class ClienteMatcher:
         Busca un cliente por documento (DNI/CUIT).
 
         La comparación se hace solo con dígitos para ignorar formato.
+        Usa DatabaseGateway para thread-safety.
         """
         from app.models import Cliente
 
@@ -97,7 +111,39 @@ class ClienteMatcher:
         if len(doc_limpio) < 7:
             return None, 0.0
 
-        # Buscar clientes del usuario
+        # Usar gateway si está disponible
+        if self._use_gateway:
+            def _buscar(session):
+                clientes = session.query(Cliente).filter(
+                    Cliente.usuario_id == usuario_id,
+                    Cliente.activo == True,
+                    Cliente.documento_identidad.isnot(None)
+                ).all()
+
+                for cliente in clientes:
+                    doc_cliente = ''.join(c for c in cliente.documento_identidad if c.isdigit())
+                    if doc_limpio == doc_cliente:
+                        # Extraer datos antes de salir del contexto
+                        return {
+                            'id': cliente.id,
+                            'nombre': cliente.nombre_completo,
+                            'documento': cliente.documento_identidad,
+                            'telefono': cliente.telefono_whatsapp,
+                            'email': cliente.email
+                        }
+                return None
+
+            gateway = self._get_gateway()
+            result = gateway.read(_buscar, app=self._app, description="buscar cliente por documento")
+
+            if result:
+                # Recargar el cliente en contexto Flask si es necesario
+                cliente = Cliente.query.get(result['id'])
+                return cliente, 1.0
+
+            return None, 0.0
+
+        # Fallback: método legacy
         clientes = self.session.query(Cliente).filter(
             Cliente.usuario_id == usuario_id,
             Cliente.activo == True,
