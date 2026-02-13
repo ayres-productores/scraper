@@ -360,19 +360,15 @@ class ScanBuffer:
                         archivo_repo_id=archivo_repo.id if archivo_repo else None
                     )
                     db_session.add(archivo)
-
-                    # Extraer datos del asegurado y hacer matching con cliente existente
-                    try:
-                        self._extraer_y_vincular_cliente(
-                            archivo, pdf_data['ruta_archivo'], db_session
-                        )
-                    except Exception as match_err:
-                        logger.debug(f"Error en matching cliente para {pdf_data['nombre_archivo']}: {match_err}")
-                        # No fallar el escaneo por error de matching
-
                     resultados['pdfs_insertados'] += 1
                 except Exception as e:
                     resultados['errores'].append(f"PDF {pdf_data.get('nombre_archivo')}: {e}")
+
+            # NOTA: La extracción de datos del asegurado y matching de clientes
+            # se hace en la API de visualización (api_extraer_datos_pdf) para
+            # evitar problemas de sesión durante la consolidación masiva.
+            # Los campos asegurado_nombre_extraido/documento_extraido se llenan
+            # cuando el usuario abre el PDF en el visor.
 
             # 3. Insertar correos procesados
             if total_correos > 0:

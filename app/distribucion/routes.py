@@ -2398,7 +2398,44 @@ def api_extraer_datos_pdf(archivo_id):
         # Quitar texto muestra del JSON (muy grande)
         datos.pop('texto_muestra', None)
 
-        # Incluir información de cliente existente si fue detectado al escanear
+        # ================================================================
+        # LAZY MATCHING: Si no se hizo durante consolidación, hacerlo ahora
+        # ================================================================
+        asegurado_nombre = datos.get('asegurado_nombre')
+        asegurado_documento = datos.get('asegurado_documento')
+
+        # Guardar datos del asegurado si no se guardaron antes
+        if asegurado_nombre and not archivo.asegurado_nombre_extraido:
+            archivo.asegurado_nombre_extraido = str(asegurado_nombre)[:255]
+        if asegurado_documento and not archivo.asegurado_documento_extraido:
+            archivo.asegurado_documento_extraido = str(asegurado_documento)[:50]
+
+        # Hacer matching si no se hizo antes y tenemos datos
+        if not archivo.cliente_existente_id and (asegurado_nombre or asegurado_documento):
+            try:
+                from app.extractor.cliente_matcher import ClienteMatcher
+                from datetime import datetime
+
+                matcher = ClienteMatcher()
+                cliente_match, tipo_match, confianza = matcher.buscar_cliente(
+                    usuario_id=current_user.id,
+                    documento=asegurado_documento,
+                    nombre=asegurado_nombre
+                )
+
+                if cliente_match:
+                    archivo.cliente_existente_id = cliente_match.id
+                    archivo.cliente_match_tipo = tipo_match
+                    archivo.cliente_match_confianza = confianza
+                    archivo.fecha_matching = datetime.utcnow()
+
+                db.session.commit()
+            except Exception as e_match:
+                # Si falla el matching, no es crítico - continuar sin él
+                db.session.rollback()
+                logger.debug(f"Error en lazy matching para archivo {archivo_id}: {e_match}")
+
+        # Incluir información de cliente existente
         datos['cliente_existente'] = None
         if archivo.cliente_existente_id:
             cliente = Cliente.query.get(archivo.cliente_existente_id)
