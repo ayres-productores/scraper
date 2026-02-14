@@ -82,7 +82,6 @@ def create_app(config_class=None):
     _diag("Importando blueprints...")
     from app.auth.routes import auth_bp
     from app.main.routes import main_bp
-    from app.extractor.routes import extractor_bp
     from app.admin.routes import admin_bp
     from app.distribucion.routes import distribucion_bp
     from app.api.routes import api_bp
@@ -91,7 +90,6 @@ def create_app(config_class=None):
     _diag("Registrando blueprints...")
     app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
-    app.register_blueprint(extractor_bp, url_prefix='/extractor')
     app.register_blueprint(admin_bp, url_prefix='/admin')
     app.register_blueprint(distribucion_bp, url_prefix='/distribucion')
     app.register_blueprint(api_bp, url_prefix='/api')
@@ -125,9 +123,6 @@ def create_app(config_class=None):
 
     # Sincronizar archivos disco <-> BD en background (no bloquea el boot)
     _iniciar_sincronizacion_background(app)
-
-    # Consolidar buffers de escaneos pendientes (de escaneos interrumpidos anteriormente)
-    _consolidar_buffers_pendientes(app)
 
     # Iniciar procesador de cola de WhatsApp (solo si no es el proceso de recarga)
     _diag(f"Verificando WhatsApp processor... WERKZEUG_RUN_MAIN={os.environ.get('WERKZEUG_RUN_MAIN')}, debug={app.debug}")
@@ -198,46 +193,17 @@ def _iniciar_sincronizacion_background(app):
         _diag("Sincronización background OMITIDA (proceso padre de reloader)")
 
 
-def _consolidar_buffers_pendientes(app):
-    """Consolida buffers de escaneos interrumpidos anteriormente.
-
-    Al iniciar la app, busca archivos JSON de buffers pendientes
-    (de escaneos que fueron cancelados o interrumpidos) y los consolida
-    a la base de datos.
-    """
-    import threading
-
-    def _consolidar_worker():
-        """Worker que ejecuta la consolidación con contexto de app."""
-        try:
-            from app.utils.scan_buffer import consolidar_pendientes
-            consolidar_pendientes(app)
-        except Exception as e:
-            _diag(f"Error consolidando buffers pendientes: {e}")
-
-    # Solo ejecutar en el proceso principal (evitar duplicados en reloader)
-    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
-        thread = threading.Thread(target=_consolidar_worker, daemon=True, name="ConsolidarBuffers")
-        thread.start()
-        _diag("Thread de consolidación de buffers iniciado")
-    else:
-        _diag("Consolidación de buffers OMITIDA (proceso padre de reloader)")
-
-
 def sincronizar_archivos(db_session=None):
     """
     Sincroniza los archivos en disco con la base de datos al iniciar.
 
-    1. Detecta PDFs en disco que no están en BD y los agrega
-    2. Elimina registros de BD cuyos archivos ya no existen
+    Solo elimina registros de BD cuyos archivos ya no existen en disco.
+    La detección de nuevos archivos la hace el extractor_server.
 
     Args:
         db_session: Sesión SQLAlchemy thread-safe (opcional, usa db.session si no se provee)
     """
-    from app.models import ArchivoDescargado, Escaneo, Compania, RegistroAnalisisPDF
-    from app.extractor.pdf_parser import ExtractorDatosPoliza
-    from datetime import datetime
-    import hashlib
+    from app.models import ArchivoDescargado, RegistroAnalisisPDF
 
     # Usar la sesión proporcionada o db.session como fallback
     if db_session is None:
@@ -245,113 +211,9 @@ def sincronizar_archivos(db_session=None):
 
     _diag("Sincronizando archivos disco <-> BD...")
 
-    base_path = get_base_path()
-    uploads_dirs = [
-        os.path.join(base_path, 'uploads'),
-        os.path.join(base_path, 'archivos_usuarios'),
-    ]
-
-    archivos_en_disco = set()
-    nuevos = 0
     huerfanos = 0
 
-    # Fase 1: Buscar PDFs en disco
-    for uploads_dir in uploads_dirs:
-        if not os.path.exists(uploads_dir):
-            continue
-
-        for root, dirs, files in os.walk(uploads_dir):
-            for filename in files:
-                if filename.lower().endswith('.pdf'):
-                    ruta_completa = os.path.join(root, filename)
-                    archivos_en_disco.add(ruta_completa)
-
-    # Fase 2: Verificar cuáles no están en BD y agregarlos
-    rutas_en_bd = {a.ruta_archivo for a in db_session.query(ArchivoDescargado).all()}
-
-    for ruta in archivos_en_disco:
-        if ruta not in rutas_en_bd:
-            # Archivo nuevo - agregarlo a la BD
-            try:
-                # Necesitamos un escaneo para asociar el archivo
-                # Buscar o crear un escaneo genérico del usuario admin
-                from app.models import Usuario
-                admin = db_session.query(Usuario).filter_by(correo='admin@empresa.com').first()
-                if not admin:
-                    continue
-
-                escaneo = db_session.query(Escaneo).filter_by(usuario_id=admin.id).first()
-                if not escaneo:
-                    escaneo = Escaneo(
-                        usuario_id=admin.id,
-                        estado='completado',
-                        fecha_inicio=datetime.utcnow(),
-                        fecha_fin=datetime.utcnow()
-                    )
-                    db_session.add(escaneo)
-                    db_session.flush()
-
-                # Calcular hash
-                with open(ruta, 'rb') as f:
-                    hash_archivo = hashlib.sha256(f.read()).hexdigest()
-
-                # Detectar compañía
-                extractor = ExtractorDatosPoliza()
-                texto = extractor.extraer_texto_pdf(ruta)
-                compania_detectada = extractor.detectar_compania(texto) if texto else None
-
-                compania_id = None
-                if compania_detectada:
-                    # Mapeo de nombres clave a dominios de email
-                    from app.extractor.companias_utils import obtener_nombre_oficial
-                    mapeo_dominios = {
-                        'liderar': 'liderarseguros.com.ar',
-                        'mercantil_andina': 'lamercantil.com.ar',
-                        'rio_uruguay': 'riouruguay.com.ar',
-                        'berkley': 'berkley.com.ar',
-                    }
-                    dominio = mapeo_dominios.get(compania_detectada)
-
-                    # Buscar compañía existente por dominio
-                    comp = None
-                    if dominio:
-                        comp = db_session.query(Compania).filter_by(dominio_email=dominio).first()
-
-                    # Si no existe, crearla con el nombre oficial
-                    if not comp and dominio:
-                        nombre_oficial = obtener_nombre_oficial(compania_detectada)
-                        comp = Compania(
-                            nombre=nombre_oficial,
-                            dominio_email=dominio,
-                            cantidad_documentos=0
-                        )
-                        db_session.add(comp)
-                        db_session.flush()
-                        _diag(f"  Nueva compañía: {nombre_oficial}")
-
-                    if comp:
-                        compania_id = comp.id
-
-                nombre_archivo = os.path.basename(ruta)
-                tamano = os.path.getsize(ruta)
-
-                archivo = ArchivoDescargado(
-                    escaneo_id=escaneo.id,
-                    nombre_archivo=nombre_archivo,
-                    ruta_archivo=ruta,
-                    tamano_bytes=tamano,
-                    hash_archivo=hash_archivo,
-                    compania_id=compania_id,
-                    fecha_descarga=datetime.utcnow(),
-                    id_documento=ArchivoDescargado.generar_siguiente_id()
-                )
-                db_session.add(archivo)
-                nuevos += 1
-
-            except Exception as e:
-                _diag(f"  Error agregando {os.path.basename(ruta)}: {e}")
-
-    # Fase 3: Eliminar registros huérfanos (archivos en BD que no existen en disco)
+    # Eliminar registros huérfanos (archivos en BD que no existen en disco)
     for archivo in db_session.query(ArchivoDescargado).all():
         if not os.path.exists(archivo.ruta_archivo):
             # Eliminar registros relacionados primero
@@ -359,9 +221,8 @@ def sincronizar_archivos(db_session=None):
             db_session.delete(archivo)
             huerfanos += 1
 
-    db_session.commit()
-
-    if nuevos > 0 or huerfanos > 0:
-        _diag(f"Sincronización: +{nuevos} nuevos, -{huerfanos} huérfanos eliminados")
+    if huerfanos > 0:
+        db_session.commit()
+        _diag(f"Sincronización: {huerfanos} huérfanos eliminados")
     else:
         _diag("Sincronización: sin cambios")

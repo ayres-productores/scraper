@@ -1,11 +1,12 @@
 """
-Servicio de Asignacion Inteligente con Extraccion Predictiva Mejorable.
+Servicio de Asignacion de Polizas.
 
 Este servicio orquesta:
-1. Extraccion de datos de PDFs con aprendizaje aplicado
-2. Busqueda de clientes similares por documento/nombre
-3. Creacion unificada de Cliente + Poliza
-4. Registro de correcciones para entrenamiento del algoritmo
+1. Busqueda de clientes similares por documento/nombre
+2. Creacion unificada de Cliente + Poliza
+
+NOTA: La extraccion de PDFs ahora la hace el extractor_server separado.
+Este servicio solo maneja la asignacion manual de polizas.
 """
 
 import os
@@ -21,8 +22,6 @@ from app.models import (
     Cliente, PolizaCliente, ArchivoDescargado, Compania,
     LogCorreccionExtraccion, Escaneo
 )
-from app.extractor.pdf_parser import ExtractorDatosPoliza
-from app.extractor.aprendizaje import obtener_motor, registrar_lote_correcciones
 
 
 class AsignacionInteligenteService:
@@ -44,18 +43,19 @@ class AsignacionInteligenteService:
             usuario_id: ID del usuario (broker) que realiza la asignacion
         """
         self.usuario_id = usuario_id
-        self.motor = obtener_motor()
-        self.extractor = ExtractorDatosPoliza()
 
     def extraer_datos_pdf(self, archivo_id: int) -> Dict:
         """
-        Extrae datos del PDF aplicando aprendizaje previo.
+        Extrae datos del PDF.
+
+        NOTA: La extraccion ahora la hace el extractor_server.
+        Este metodo retorna los datos ya almacenados en la BD.
 
         Args:
             archivo_id: ID del archivo en la base de datos
 
         Returns:
-            Dict con datos estructurados o error
+            Dict con datos del archivo o error
         """
         # Obtener archivo verificando pertenencia al usuario
         archivo = ArchivoDescargado.query.join(Escaneo).filter(
@@ -66,43 +66,22 @@ class AsignacionInteligenteService:
         if not archivo:
             return {'error': 'Archivo no encontrado o sin permisos'}
 
-        if not os.path.exists(archivo.ruta_archivo):
-            return {'error': f'Archivo fisico no encontrado: {archivo.ruta_archivo}'}
-
-        # Preparar info del archivo para metadata
-        archivo_info = {
-            'id': archivo.id,
-            'nombre': archivo.nombre_archivo,
-            'fecha': archivo.fecha_correo.isoformat() if archivo.fecha_correo else None,
-            'remitente': archivo.remitente,
-            'asunto': archivo.asunto
+        # Retornar datos basicos del archivo (la extraccion la hace extractor_server)
+        datos = {
+            'archivo': {
+                'id': archivo.id,
+                'nombre': archivo.nombre_archivo,
+                'fecha': archivo.fecha_correo.isoformat() if archivo.fecha_correo else None,
+                'remitente': archivo.remitente,
+                'asunto': archivo.asunto
+            },
+            'compania': {
+                'id_sugerida': archivo.compania_id,
+                'nombre': archivo.compania.nombre if archivo.compania else None
+            },
+            'clientes_sugeridos': [],
+            'mensaje': 'La extraccion de datos se realiza desde el servidor de extraccion separado'
         }
-
-        # Extraer con formato estructurado
-        datos = self.extractor.extraer_datos_estructurado(archivo.ruta_archivo, archivo_info)
-
-        if 'error' in datos:
-            return datos
-
-        # Agregar ID de compania sugerida si hay
-        if archivo.compania_id:
-            datos['compania']['id_sugerida'] = archivo.compania_id
-        elif datos['compania']['detectada']:
-            # Buscar compania por nombre
-            compania = Compania.query.filter(
-                Compania.clave == datos['compania']['detectada']
-            ).first()
-            if compania:
-                datos['compania']['id_sugerida'] = compania.id
-
-        # Buscar clientes similares
-        datos['clientes_sugeridos'] = self._buscar_clientes_similares(datos.get('cliente', {}))
-
-        # Marcar si hay cliente auto-seleccionable (documento coincide 100%)
-        if datos['clientes_sugeridos']:
-            mejor = datos['clientes_sugeridos'][0]
-            if mejor.get('razon') == 'documento_coincide' and mejor.get('score', 0) >= 0.95:
-                datos['cliente_autoseleccionado'] = mejor
 
         return datos
 
@@ -201,8 +180,7 @@ class AsignacionInteligenteService:
 
             # 1. Crear o seleccionar cliente
             if datos.get('crear_cliente'):
-                cliente = self._crear_cliente(datos.get('datos_cliente', {}))
-                cliente_creado = True
+                cliente, cliente_creado = self._crear_cliente(datos.get('datos_cliente', {}))
             else:
                 cliente_id = datos.get('cliente_id')
                 if cliente_id:
@@ -225,25 +203,8 @@ class AsignacionInteligenteService:
 
             db.session.flush()  # Para obtener poliza.id
 
-            # 3. Registrar correcciones si las hay
+            # 3. Las correcciones ahora las maneja el extractor_server
             correcciones_registradas = 0
-            correcciones = datos.get('correcciones', [])
-
-            if correcciones:
-                contexto = {
-                    'archivo_id': datos.get('archivo_id'),
-                    'usuario_id': self.usuario_id,
-                    'poliza_id': poliza.id,
-                    'cliente_id': cliente.id,
-                    'compania': datos.get('datos_poliza', {}).get('compania_nombre'),
-                    'tipo_seguro': datos.get('datos_poliza', {}).get('tipo_seguro'),
-                    'tiempo_edicion': datos.get('tiempo_edicion', 0)
-                }
-
-                correcciones_registradas, _ = registrar_lote_correcciones(
-                    correcciones,
-                    contexto
-                )
 
             # 4. Crear backup del PDF si existe
             archivo = ArchivoDescargado.query.get(datos.get('archivo_id'))
@@ -268,15 +229,15 @@ class AsignacionInteligenteService:
             current_app.logger.error(f"Error en guardar_asignacion: {str(e)}")
             return {'exito': False, 'error': str(e)}
 
-    def _crear_cliente(self, datos: Dict) -> Cliente:
+    def _crear_cliente(self, datos: Dict) -> tuple:
         """
-        Crea un nuevo cliente con los datos proporcionados.
+        Crea un nuevo cliente o recupera existente si coincide documento.
 
         Args:
             datos: Diccionario con campos del cliente
 
         Returns:
-            Instancia de Cliente creada
+            tuple: (cliente, es_nuevo) - Cliente y si fue creado nuevo
         """
         # Parsear nombre si viene junto
         nombre_completo = datos.get('nombre', '')
@@ -294,18 +255,19 @@ class AsignacionInteligenteService:
             nombre = partes[0].strip()
             apellido = partes[1].strip() if len(partes) > 1 else ''
 
-        cliente = Cliente(
+        # Usar método que unifica por documento
+        cliente, es_nuevo, mensaje = Cliente.obtener_o_crear(
             usuario_id=self.usuario_id,
             nombre=nombre,
             apellido=apellido,
             telefono_whatsapp=datos.get('telefono_whatsapp', ''),
             email=datos.get('email'),
             documento_identidad=datos.get('documento_identidad'),
-            notas=datos.get('notas')
+            notas=datos.get('notas'),
+            actualizar_existente=True
         )
 
-        db.session.add(cliente)
-        return cliente
+        return cliente, es_nuevo
 
     def _crear_poliza(self, cliente_id: int, datos: Dict, archivo_id: int) -> PolizaCliente:
         """

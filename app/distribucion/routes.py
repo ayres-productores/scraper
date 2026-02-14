@@ -1953,7 +1953,7 @@ def todos_siniestros():
 @login_required
 def interprete_pdf():
     """Panel principal del intérprete de pólizas PDF."""
-    from app.extractor.pdf_parser import ExtractorDatosPoliza
+    # NOTA: La extracción ahora la hace extractor_server
 
     # Obtener archivos del usuario
     archivos = ArchivoDescargado.query.join(Escaneo).filter(
@@ -1996,9 +1996,12 @@ def interprete_pdf():
 @distribucion_bp.route('/interprete-pdf/extraer/<int:archivo_id>')
 @login_required
 def extraer_pdf(archivo_id):
-    """Extrae y muestra los datos de un PDF para revisión."""
+    """Extrae y muestra los datos de un PDF para revisión.
+
+    NOTA: La extracción de datos ahora la hace extractor_server.
+    Esta vista muestra los datos ya extraídos almacenados en BD.
+    """
     import os
-    from app.extractor.pdf_parser import ExtractorDatosPoliza
 
     archivo = ArchivoDescargado.query.join(Escaneo).filter(
         ArchivoDescargado.id == archivo_id,
@@ -2008,18 +2011,24 @@ def extraer_pdf(archivo_id):
     # Verificar si ya tiene póliza asociada
     poliza_existente = PolizaCliente.query.filter_by(archivo_id=archivo.id).first()
 
-    # Extraer datos del PDF
+    # La extracción la hace extractor_server - aquí solo mostramos datos existentes
     datos_extraidos = {}
-    error_extraccion = None
+    error_extraccion = "La extracción de datos se realiza desde el servidor de extracción"
 
-    if os.path.exists(archivo.ruta_archivo):
-        try:
-            extractor = ExtractorDatosPoliza()
-            datos_extraidos = extractor.extraer_datos(archivo.ruta_archivo)
-        except Exception as e:
-            error_extraccion = str(e)
-    else:
-        error_extraccion = "Archivo no encontrado en el sistema"
+    # Si ya hay una póliza, usar sus datos
+    if poliza_existente:
+        datos_extraidos = {
+            'asegurado_nombre': poliza_existente.asegurado_nombre,
+            'asegurado_documento': poliza_existente.asegurado_documento,
+            'numero_poliza': poliza_existente.numero_poliza,
+            'tipo_seguro': poliza_existente.tipo_seguro,
+            'fecha_vigencia_desde': poliza_existente.fecha_vigencia_desde,
+            'fecha_vigencia_hasta': poliza_existente.fecha_vigencia_hasta,
+            'vehiculo_patente': poliza_existente.vehiculo_patente,
+            'vehiculo_marca': poliza_existente.vehiculo_marca,
+            'vehiculo_modelo': poliza_existente.vehiculo_modelo,
+        }
+        error_extraccion = None
 
     # Obtener clientes del usuario para asignar
     clientes = Cliente.query.filter_by(activo=True).order_by(Cliente.nombre).all()
@@ -2177,10 +2186,11 @@ def guardar_extraccion(archivo_id):
 @distribucion_bp.route('/interprete-pdf/lote', methods=['POST'])
 @login_required
 def procesar_lote_pdf():
-    """Procesa múltiples PDFs automáticamente."""
-    import os
-    from app.extractor.pdf_parser import ExtractorDatosPoliza
+    """Procesa múltiples PDFs automáticamente.
 
+    NOTA: La extracción automática ahora la hace extractor_server.
+    Esta función crea pólizas con datos básicos sin extracción.
+    """
     cliente_id = request.form.get('cliente_id')
     archivo_ids = request.form.getlist('archivo_ids')
 
@@ -2198,7 +2208,6 @@ def procesar_lote_pdf():
         return redirect(url_for('distribucion.interprete_pdf'))
 
     procesados = 0
-    errores = 0
 
     for archivo_id in archivo_ids:
         archivo = ArchivoDescargado.query.join(Escaneo).filter(
@@ -2207,44 +2216,29 @@ def procesar_lote_pdf():
         ).first()
 
         if not archivo:
-            errores += 1
             continue
 
         # Verificar que no tenga póliza
         if PolizaCliente.query.filter_by(archivo_id=archivo.id).first():
             continue
 
-        # Extraer datos
-        if not os.path.exists(archivo.ruta_archivo):
-            errores += 1
-            continue
-
-        try:
-            extractor = ExtractorDatosPoliza()
-            datos = extractor.extraer_datos(archivo.ruta_archivo)
-            datos_poliza = extractor.datos_para_poliza(datos)
-
-            # Crear póliza
-            nueva_poliza = PolizaCliente(
-                cliente_id=cliente.id,
-                archivo_id=archivo.id,
-                compania_id=archivo.compania_id,
-                fecha_extraccion=datetime.utcnow(),
-                **datos_poliza
-            )
-            db.session.add(nueva_poliza)
-            procesados += 1
-
-        except Exception as e:
-            errores += 1
-            continue
+        # Crear póliza básica (sin extracción - eso lo hace extractor_server)
+        nueva_poliza = PolizaCliente(
+            cliente_id=cliente.id,
+            archivo_id=archivo.id,
+            compania_id=archivo.compania_id,
+            fecha_extraccion=datetime.utcnow(),
+            asegurado_nombre=cliente.nombre_completo
+        )
+        db.session.add(nueva_poliza)
+        procesados += 1
 
     db.session.commit()
 
     if procesados > 0:
         flash(f'{procesados} póliza(s) creada(s) correctamente.', 'success')
-    if errores > 0:
-        flash(f'{errores} archivo(s) con errores.', 'warning')
+    else:
+        flash('No se procesaron archivos.', 'info')
 
     return redirect(url_for('distribucion.interprete_pdf'))
 
@@ -2252,9 +2246,12 @@ def procesar_lote_pdf():
 @distribucion_bp.route('/interprete-pdf/reextraer/<int:poliza_id>')
 @login_required
 def reextraer_pdf(poliza_id):
-    """Re-extrae datos de un PDF ya procesado para comparación."""
+    """Re-extrae datos de un PDF ya procesado para comparación.
+
+    NOTA: La extracción ahora la hace extractor_server.
+    Esta función muestra los datos actuales sin re-extraer.
+    """
     import os
-    from app.extractor.pdf_parser import ExtractorDatosPoliza
 
     poliza = PolizaCliente.query.join(Cliente).filter(
         PolizaCliente.id == poliza_id,
@@ -2270,9 +2267,14 @@ def reextraer_pdf(poliza_id):
         flash('Archivo PDF no encontrado.', 'danger')
         return redirect(url_for('distribucion.interprete_pdf'))
 
-    # Re-extraer datos
-    extractor = ExtractorDatosPoliza()
-    datos_nuevos = extractor.extraer_datos(archivo.ruta_archivo)
+    # La re-extracción no está disponible - mostrar datos actuales
+    flash('La re-extracción se realiza desde el servidor de extracción.', 'info')
+    datos_nuevos = {
+        'asegurado_nombre': poliza.asegurado_nombre,
+        'asegurado_documento': poliza.asegurado_documento,
+        'numero_poliza': poliza.numero_poliza,
+        'mensaje': 'Re-extracción no disponible desde este servidor'
+    }
 
     return render_template('distribucion/comparar_extraccion.html',
                           poliza=poliza,
@@ -2341,9 +2343,12 @@ def asignar_poliza_inteligente():
 @distribucion_bp.route('/api/extraer-pdf/<int:archivo_id>')
 @login_required
 def api_extraer_datos_pdf(archivo_id):
-    """API que extrae datos de un PDF y los devuelve en JSON."""
+    """API que devuelve datos de un PDF almacenados en BD.
+
+    NOTA: La extracción de datos la hace extractor_server.
+    Esta API devuelve datos ya extraídos o información básica del archivo.
+    """
     import os
-    from app.extractor.pdf_parser import ExtractorDatosPoliza
 
     archivo = ArchivoDescargado.query.join(Escaneo).filter(
         ArchivoDescargado.id == archivo_id,
@@ -2356,111 +2361,64 @@ def api_extraer_datos_pdf(archivo_id):
             'error': 'Archivo no encontrado'
         }), 404
 
-    if not os.path.exists(archivo.ruta_archivo):
-        return jsonify({
-            'exito': False,
-            'error': 'El archivo PDF no existe en el servidor'
-        }), 404
+    # Construir datos desde la información almacenada
+    datos = {
+        'archivo_id': archivo.id,
+        'archivo_nombre': archivo.nombre_archivo,
+        'archivo_fecha': archivo.fecha_correo.strftime('%Y-%m-%d') if archivo.fecha_correo else None,
+        'archivo_remitente': archivo.remitente,
+        'archivo_asunto': archivo.asunto,
+        'asegurado_nombre': archivo.asegurado_nombre_extraido,
+        'asegurado_documento': archivo.asegurado_documento_extraido,
+    }
 
-    try:
-        extractor = ExtractorDatosPoliza()
-        datos = extractor.extraer_datos(archivo.ruta_archivo)
-        resumen = extractor.resumen_extraccion()
+    # Si el archivo tiene compañía detectada
+    if archivo.compania_id:
+        compania = Compania.query.get(archivo.compania_id)
+        if compania:
+            datos['compania_nombre_formal'] = compania.nombre
+            datos['compania_id_sugerida'] = compania.id
 
-        # Agregar informacion del archivo
-        datos['archivo_id'] = archivo.id
-        datos['archivo_nombre'] = archivo.nombre_archivo
-        datos['archivo_fecha'] = archivo.fecha_correo.strftime('%Y-%m-%d') if archivo.fecha_correo else None
-        datos['archivo_remitente'] = archivo.remitente
-        datos['archivo_asunto'] = archivo.asunto
-
-        # Si el archivo ya tiene compania detectada, usar esa
-        if archivo.compania_id and not datos.get('compania_detectada'):
-            compania = Compania.query.get(archivo.compania_id)
-            if compania:
-                datos['compania_nombre_formal'] = compania.nombre
-                datos['compania_id_sugerida'] = compania.id
-
-        # Formatear fechas para JSON
-        if datos.get('fecha_vigencia_desde'):
-            datos['fecha_vigencia_desde'] = datos['fecha_vigencia_desde'].isoformat()
-        if datos.get('fecha_vigencia_hasta'):
-            datos['fecha_vigencia_hasta'] = datos['fecha_vigencia_hasta'].isoformat()
-
-        # Formatear montos para JSON
-        if datos.get('prima_anual'):
-            datos['prima_anual'] = float(datos['prima_anual'])
-        if datos.get('suma_asegurada'):
-            datos['suma_asegurada'] = float(datos['suma_asegurada'])
-        if datos.get('deducible'):
-            datos['deducible'] = float(datos['deducible'])
-
-        # Quitar texto muestra del JSON (muy grande)
-        datos.pop('texto_muestra', None)
-
-        # ================================================================
-        # LAZY MATCHING: Si no se hizo durante consolidación, hacerlo ahora
-        # ================================================================
-        asegurado_nombre = datos.get('asegurado_nombre')
-        asegurado_documento = datos.get('asegurado_documento')
-
-        # Guardar datos del asegurado si no se guardaron antes
-        if asegurado_nombre and not archivo.asegurado_nombre_extraido:
-            archivo.asegurado_nombre_extraido = str(asegurado_nombre)[:255]
-        if asegurado_documento and not archivo.asegurado_documento_extraido:
-            archivo.asegurado_documento_extraido = str(asegurado_documento)[:50]
-
-        # Hacer matching si no se hizo antes y tenemos datos
-        if not archivo.cliente_existente_id and (asegurado_nombre or asegurado_documento):
-            try:
-                from app.extractor.cliente_matcher import ClienteMatcher
-                from datetime import datetime
-
-                matcher = ClienteMatcher()
-                cliente_match, tipo_match, confianza = matcher.buscar_cliente(
-                    usuario_id=current_user.id,
-                    documento=asegurado_documento,
-                    nombre=asegurado_nombre
-                )
-
-                if cliente_match:
-                    archivo.cliente_existente_id = cliente_match.id
-                    archivo.cliente_match_tipo = tipo_match
-                    archivo.cliente_match_confianza = confianza
-                    archivo.fecha_matching = datetime.utcnow()
-
-                db.session.commit()
-            except Exception as e_match:
-                # Si falla el matching, no es crítico - continuar sin él
-                db.session.rollback()
-                logger.debug(f"Error en lazy matching para archivo {archivo_id}: {e_match}")
-
-        # Incluir información de cliente existente
-        datos['cliente_existente'] = None
-        if archivo.cliente_existente_id:
-            cliente = Cliente.query.get(archivo.cliente_existente_id)
-            if cliente:
-                datos['cliente_existente'] = {
-                    'id': cliente.id,
-                    'nombre_completo': cliente.nombre_completo,
-                    'documento': cliente.documento_identidad,
-                    'telefono': cliente.telefono_whatsapp,
-                    'email': cliente.email,
-                    'match_tipo': archivo.cliente_match_tipo,
-                    'match_confianza': archivo.cliente_match_confianza
-                }
-
-        return jsonify({
-            'exito': True,
-            'datos': datos,
-            'resumen': resumen
+    # Buscar póliza existente para obtener más datos
+    poliza = PolizaCliente.query.filter_by(archivo_id=archivo.id).first()
+    if poliza:
+        datos.update({
+            'numero_poliza': poliza.numero_poliza,
+            'tipo_seguro': poliza.tipo_seguro,
+            'fecha_vigencia_desde': poliza.fecha_vigencia_desde.isoformat() if poliza.fecha_vigencia_desde else None,
+            'fecha_vigencia_hasta': poliza.fecha_vigencia_hasta.isoformat() if poliza.fecha_vigencia_hasta else None,
+            'prima_anual': float(poliza.prima_anual) if poliza.prima_anual else None,
+            'vehiculo_patente': poliza.vehiculo_patente,
+            'vehiculo_marca': poliza.vehiculo_marca,
+            'vehiculo_modelo': poliza.vehiculo_modelo,
         })
 
-    except Exception as e:
-        return jsonify({
-            'exito': False,
-            'error': str(e)
-        }), 500
+    # Incluir información de cliente existente si ya hay matching
+    datos['cliente_existente'] = None
+    if archivo.cliente_existente_id:
+        cliente = Cliente.query.get(archivo.cliente_existente_id)
+        if cliente:
+            datos['cliente_existente'] = {
+                'id': cliente.id,
+                'nombre_completo': cliente.nombre_completo,
+                'documento': cliente.documento_identidad,
+                'telefono': cliente.telefono_whatsapp,
+                'email': cliente.email,
+                'match_tipo': archivo.cliente_match_tipo,
+                'match_confianza': archivo.cliente_match_confianza
+            }
+
+    resumen = {
+        'compania': archivo.compania.nombre if archivo.compania else None,
+        'confianza': 0.5,
+        'mensaje': 'Datos obtenidos desde BD (extracción en servidor separado)'
+    }
+
+    return jsonify({
+        'exito': True,
+        'datos': datos,
+        'resumen': resumen
+    })
 
 
 @distribucion_bp.route('/asignar-inteligente/guardar', methods=['POST'])
@@ -2635,29 +2593,8 @@ def guardar_asignacion_inteligente():
     db.session.add(poliza)
     db.session.flush()  # Para obtener poliza.id antes del commit
 
-    # Registrar correcciones para aprendizaje
-    correcciones_json = request.form.get('correcciones_json', '[]')
-    tiempo_edicion = request.form.get('tiempo_edicion', '0')
-
-    try:
-        correcciones = json_module.loads(correcciones_json)
-        if correcciones:
-            from app.extractor.aprendizaje import registrar_lote_correcciones
-
-            contexto = {
-                'archivo_id': archivo.id,
-                'usuario_id': current_user.id,
-                'poliza_id': poliza.id,
-                'cliente_id': cliente.id,
-                'compania': archivo.compania.nombre if archivo.compania else None,
-                'tipo_seguro': poliza.tipo_seguro,
-                'tiempo_edicion': int(tiempo_edicion) if tiempo_edicion else 0
-            }
-
-            correcciones_registradas, _ = registrar_lote_correcciones(correcciones, contexto)
-            current_app.logger.info(f'Registradas {correcciones_registradas} correcciones para poliza {poliza.id}')
-    except Exception as e:
-        current_app.logger.warning(f'Error registrando correcciones: {e}')
+    # Las correcciones ahora las maneja el extractor_server
+    # (El aprendizaje se centralizó en el servidor de extracción)
 
     db.session.commit()
 
@@ -2946,25 +2883,17 @@ def api_estadisticas_aprendizaje():
     """
     Retorna estadisticas del motor de aprendizaje.
 
-    Incluye:
-    - Total de correcciones registradas
-    - Campos con mas errores
-    - Distribucion por tipo de cambio
-    - Distribucion por compania
+    NOTA: El aprendizaje ahora lo maneja extractor_server.
     """
-    from app.extractor.aprendizaje import obtener_estadisticas_aprendizaje
-
-    try:
-        stats = obtener_estadisticas_aprendizaje()
-        return jsonify({
-            'exito': True,
-            'estadisticas': stats
-        })
-    except Exception as e:
-        return jsonify({
-            'exito': False,
-            'error': str(e)
-        }), 500
+    return jsonify({
+        'exito': True,
+        'estadisticas': {
+            'mensaje': 'El motor de aprendizaje está en el servidor de extracción',
+            'total_correcciones': 0,
+            'campos_frecuentes': [],
+            'por_compania': {}
+        }
+    })
 
 
 # =============================================================================
@@ -3110,43 +3039,35 @@ def inicializar_registros_analisis():
 @distribucion_bp.route('/analisis-pdf/procesar/<int:archivo_id>')
 @login_required
 def procesar_pdf(archivo_id):
-    """Muestra la interfaz para procesar un PDF individual."""
+    """Muestra la interfaz para procesar un PDF individual.
+
+    NOTA: La extracción de datos la hace extractor_server.
+    Esta vista muestra datos existentes en BD.
+    """
     from app.models import RegistroAnalisisPDF, ArchivoDescargado, Cliente
-    from app.extractor.pdf_parser import ExtractorDatosPoliza
     import json
 
     archivo = ArchivoDescargado.query.get_or_404(archivo_id)
     registro = RegistroAnalisisPDF.obtener_o_crear(archivo_id)
 
-    # Extraer datos del PDF
+    # Obtener datos existentes (la extracción la hace extractor_server)
     datos_extraidos = {}
-    resumen = {}
+    resumen = {'mensaje': 'La extracción se realiza desde el servidor de extracción'}
     error_extraccion = None
 
-    try:
-        if os.path.exists(archivo.ruta_archivo):
-            extractor = ExtractorDatosPoliza()
-            datos_extraidos = extractor.extraer_datos(archivo.ruta_archivo)
-            resumen = extractor.resumen_extraccion()
-
-            # Actualizar registro con datos extraídos
-            registro.marcar_analizado(
-                datos_json=json.dumps(datos_extraidos, default=str, ensure_ascii=False),
-                confianza=resumen.get('confianza', 0),
-                compania=resumen.get('compania'),
-                tipo_seguro=resumen.get('tipo_seguro'),
-                numero_poliza=datos_extraidos.get('numero_poliza'),
-                fecha_vigencia_desde=datos_extraidos.get('fecha_vigencia_desde'),
-                fecha_vigencia_hasta=datos_extraidos.get('fecha_vigencia_hasta'),
-                asegurado=datos_extraidos.get('asegurado_nombre')
-            )
-            db.session.commit()
-        else:
-            error_extraccion = 'Archivo no encontrado en disco'
-    except Exception as e:
-        error_extraccion = str(e)
-        registro.marcar_error(notas=error_extraccion)
-        db.session.commit()
+    # Si hay una póliza asociada, usar esos datos
+    poliza = PolizaCliente.query.filter_by(archivo_id=archivo.id).first()
+    if poliza:
+        datos_extraidos = {
+            'asegurado_nombre': poliza.asegurado_nombre,
+            'asegurado_documento': poliza.asegurado_documento,
+            'numero_poliza': poliza.numero_poliza,
+            'tipo_seguro': poliza.tipo_seguro,
+            'fecha_vigencia_desde': poliza.fecha_vigencia_desde,
+            'fecha_vigencia_hasta': poliza.fecha_vigencia_hasta,
+            'vehiculo_patente': poliza.vehiculo_patente,
+        }
+        resumen = {'compania': archivo.compania.nombre if archivo.compania else None, 'confianza': 0.5}
 
     # Obtener clientes activos para selector
     clientes = Cliente.query.filter_by(activo=True).order_by(Cliente.nombre).all()
@@ -3341,23 +3262,24 @@ def _commit_con_reintentos(max_intentos=5):
 
 
 def _ejecutar_analisis_lote(app, task_id):
-    """Ejecuta el análisis en lote en background, actualizando progreso."""
+    """Ejecuta el análisis en lote en background.
+
+    NOTA: La extracción ahora la hace extractor_server.
+    Esta función solo marca registros como pendientes de análisis externo.
+    """
     from app.models import RegistroAnalisisPDF
-    from app.extractor.pdf_parser import ExtractorDatosPoliza
 
     with app.app_context():
-        # Limpiar sesión para evitar conflictos
         db.session.remove()
 
         try:
-            # Obtener IDs de archivos pendientes (solo IDs para evitar objetos detached)
             pendientes_ids = [r.id for r in RegistroAnalisisPDF.query.filter_by(
                 estado='pendiente'
             ).limit(50).all()]
             total = len(pendientes_ids)
 
-            # Actualizar progreso usando task_store thread-safe
             task_store.update(task_id, total=total, status='procesando')
+
             if total == 0:
                 task_store.append_log(task_id, {
                     'tipo': 'info',
@@ -3366,83 +3288,16 @@ def _ejecutar_analisis_lote(app, task_id):
                 task_store.update(task_id, finalizado=True)
                 return
 
-            analizados = 0
-            errores = 0
-
-            for i, registro_id in enumerate(pendientes_ids):
-                # Re-consultar el registro en cada iteración para evitar objetos detached
-                registro = RegistroAnalisisPDF.query.get(registro_id)
-                if not registro:
-                    continue
-
-                archivo = registro.archivo
-                nombre_archivo = archivo.nombre_archivo if archivo else f'Registro {registro.id}'
-
-                # Actualizar archivo actual
-                task_store.update(task_id, actual={
-                    'indice': i + 1,
-                    'nombre': nombre_archivo[:50],
-                    'id': registro.archivo_id
-                })
-
-                try:
-                    if archivo and os.path.exists(archivo.ruta_archivo):
-                        extractor = ExtractorDatosPoliza()
-                        datos = extractor.extraer_datos(archivo.ruta_archivo)
-                        resumen = extractor.resumen_extraccion()
-
-                        registro.marcar_analizado(
-                            datos_json=json.dumps(datos, default=str, ensure_ascii=False),
-                            confianza=resumen.get('confianza', 0),
-                            compania=resumen.get('compania'),
-                            tipo_seguro=resumen.get('tipo_seguro'),
-                            numero_poliza=datos.get('numero_poliza'),
-                            fecha_vigencia_desde=datos.get('fecha_vigencia_desde'),
-                            fecha_vigencia_hasta=datos.get('fecha_vigencia_hasta'),
-                            asegurado=datos.get('asegurado_nombre')
-                        )
-
-                        _commit_con_reintentos()
-                        analizados += 1
-
-                        task_store.update(task_id, procesados=analizados)
-                        task_store.append_log(task_id, {
-                            'tipo': 'exito',
-                            'mensaje': f'{nombre_archivo[:40]} - {resumen.get("compania", "?")} ({int(resumen.get("confianza", 0)*100)}%)'
-                        })
-                    else:
-                        registro.marcar_error('Archivo no encontrado')
-                        _commit_con_reintentos()
-                        errores += 1
-                        task_store.update(task_id, errores=errores)
-                        task_store.append_log(task_id, {
-                            'tipo': 'error',
-                            'mensaje': f'{nombre_archivo[:40]} - Archivo no encontrado'
-                        })
-                except Exception as e:
-                    db.session.rollback()
-                    try:
-                        registro = RegistroAnalisisPDF.query.get(registro_id)
-                        if registro:
-                            registro.marcar_error(str(e)[:200])
-                            _commit_con_reintentos()
-                    except Exception as e_inner:
-                        logger.warning(f"Error marcando registro {registro_id} como fallido: {e_inner}")
-                    errores += 1
-                    task_store.update(task_id, errores=errores)
-                    task_store.append_log(task_id, {
-                        'tipo': 'error',
-                        'mensaje': f'{nombre_archivo[:40]} - {str(e)[:50]}'
-                    })
-
-                # Pequeña pausa entre archivos para reducir contención
-                time.sleep(0.1)
-
-            # Marcar como finalizado
-            task_store.update(task_id, status='completado', finalizado=True)
+            # La extracción la hace extractor_server, aquí solo notificamos
             task_store.append_log(task_id, {
                 'tipo': 'info',
-                'mensaje': f'Completado: {analizados} analizados, {errores} errores'
+                'mensaje': f'Hay {total} PDFs pendientes. La extracción se realiza desde el servidor de extracción.'
+            })
+
+            task_store.update(task_id, status='completado', finalizado=True, procesados=0)
+            task_store.append_log(task_id, {
+                'tipo': 'info',
+                'mensaje': 'El análisis en lote se realiza desde el servidor de extracción separado'
             })
 
         except Exception as e:
@@ -3450,7 +3305,7 @@ def _ejecutar_analisis_lote(app, task_id):
             task_store.update(task_id, status='error', finalizado=True)
             task_store.append_log(task_id, {
                 'tipo': 'error',
-                'mensaje': f'Error general: {str(e)[:100]}'
+                'mensaje': f'Error: {str(e)[:100]}'
             })
         finally:
             db.session.remove()
