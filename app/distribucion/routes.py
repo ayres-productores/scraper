@@ -308,10 +308,7 @@ def nuevo_cliente():
 @login_required
 def cliente_detalle(cliente_id):
     """Detalle de un cliente."""
-    cliente = Cliente.query.filter_by(
-        id=cliente_id,
-        usuario_id=current_user.id
-    ).first_or_404()
+    cliente = Cliente.query.get_or_404(cliente_id)
 
     # Pólizas del cliente
     polizas = cliente.polizas.order_by(PolizaCliente.fecha_asignacion.desc()).all()
@@ -329,10 +326,7 @@ def cliente_detalle(cliente_id):
 @login_required
 def editar_cliente(cliente_id):
     """Editar cliente."""
-    cliente = Cliente.query.filter_by(
-        id=cliente_id,
-        usuario_id=current_user.id
-    ).first_or_404()
+    cliente = Cliente.query.get_or_404(cliente_id)
 
     form = ClienteForm(obj=cliente)
 
@@ -361,10 +355,7 @@ def editar_cliente(cliente_id):
 @login_required
 def eliminar_cliente(cliente_id):
     """Eliminar (desactivar) cliente."""
-    cliente = Cliente.query.filter_by(
-        id=cliente_id,
-        usuario_id=current_user.id
-    ).first_or_404()
+    cliente = Cliente.query.get_or_404(cliente_id)
 
     cliente.activo = False
     db.session.commit()
@@ -417,10 +408,7 @@ def evaluar_clientes():
 @login_required
 def marcar_cliente_gestionado(cliente_id):
     """Marca un cliente como gestionado (resuelve alerta de reactivación)."""
-    cliente = Cliente.query.filter_by(
-        id=cliente_id,
-        usuario_id=current_user.id
-    ).first_or_404()
+    cliente = Cliente.query.get_or_404(cliente_id)
 
     # Resolver alertas de reactivación pendientes
     alertas = AlertaVencimiento.query.filter_by(
@@ -545,7 +533,7 @@ def enviar_poliza(poliza_id):
         if plantilla:
             mensaje_default = plantilla.renderizar(cliente, poliza)
         else:
-            mensaje_default = f"Estimado/a {cliente.nombre},\n\nLe adjunto su póliza.\n\nSaludos cordiales."
+            mensaje_default = f"Hola {cliente.nombre}, este es un envío semi automático de tu póliza numero {poliza.numero_poliza or ''} de la compañía {poliza.obtener_nombre_compania() or ''}. Ante cualquier duda no dudes en acercarte con tu consulta. Saludos del equipo de AYRES!"
     else:
         mensaje_default = cliente.mensaje_personalizado or ''
         # Renderizar variables si las hay
@@ -609,9 +597,9 @@ def enviar_directo(cliente_id):
     # Obtener mensaje
     if cliente.usar_mensaje_estandar:
         plantilla = PlantillaMensaje.obtener_predeterminada(current_user.id)
-        mensaje = plantilla.renderizar(cliente) if plantilla else f"Hola {cliente.nombre}"
+        mensaje = plantilla.renderizar(cliente) if plantilla else f"Hola {cliente.nombre}, ante cualquier duda no dudes en acercarte con tu consulta. Saludos del equipo de AYRES!"
     else:
-        mensaje = cliente.mensaje_personalizado or f"Hola {cliente.nombre}"
+        mensaje = cliente.mensaje_personalizado or f"Hola {cliente.nombre}, ante cualquier duda no dudes en acercarte con tu consulta. Saludos del equipo de AYRES!"
 
     sender = WhatsAppSender(current_app.config)
     enlace = sender.generar_enlace_manual(cliente.telefono_formateado, mensaje)
@@ -628,10 +616,7 @@ def api_cliente_polizas(cliente_id):
     """
     from datetime import date
 
-    cliente = Cliente.query.filter_by(
-        id=cliente_id,
-        usuario_id=current_user.id
-    ).first()
+    cliente = Cliente.query.get(cliente_id)
 
     if not cliente:
         return jsonify({'success': False, 'error': 'Cliente no encontrado'}), 404
@@ -691,10 +676,7 @@ def whatsapp_enviar_mensaje():
             return jsonify({'success': False, 'error': 'Cliente no especificado'}), 400
 
         # Obtener cliente
-        cliente = Cliente.query.filter_by(
-            id=cliente_id,
-            usuario_id=current_user.id
-        ).first()
+        cliente = Cliente.query.get(cliente_id)
 
         if not cliente:
             return jsonify({'success': False, 'error': 'Cliente no encontrado'}), 404
@@ -716,9 +698,9 @@ def whatsapp_enviar_mensaje():
         if not mensaje:
             if cliente.usar_mensaje_estandar:
                 plantilla = PlantillaMensaje.obtener_predeterminada(current_user.id)
-                mensaje = plantilla.renderizar(cliente) if plantilla else f"Hola {cliente.nombre}"
+                mensaje = plantilla.renderizar(cliente) if plantilla else f"Hola {cliente.nombre}, ante cualquier duda no dudes en acercarte con tu consulta. Saludos del equipo de AYRES!"
             else:
-                mensaje = cliente.mensaje_personalizado or f"Hola {cliente.nombre}"
+                mensaje = cliente.mensaje_personalizado or f"Hola {cliente.nombre}, ante cualquier duda no dudes en acercarte con tu consulta. Saludos del equipo de AYRES!"
 
         # Preparar lista de PDFs a enviar
         pdfs_a_enviar = []
@@ -1243,6 +1225,160 @@ def crm_dashboard():
                           seguimientos=seguimientos,
                           siniestros_activos=siniestros_activos,
                           clientes_a_reactivar=clientes_a_reactivar)
+
+
+# ============================================================================
+# CRM - BUSCADOR DE PÓLIZAS
+# ============================================================================
+
+@distribucion_bp.route('/polizas')
+@login_required
+def polizas():
+    """Buscador completo de pólizas con filtros avanzados."""
+    if current_user.debe_cambiar_contrasena:
+        return redirect(url_for('auth.cambiar_contrasena_obligatorio'))
+
+    from datetime import date
+
+    # Parámetros de búsqueda
+    busqueda = request.args.get('q', '').strip()
+    compania_id = request.args.get('compania', '', type=str)
+    tipo_seguro = request.args.get('tipo', '').strip()
+    estado = request.args.get('estado', '').strip()
+    fecha_desde = request.args.get('fecha_desde', '').strip()
+    fecha_hasta = request.args.get('fecha_hasta', '').strip()
+    cliente_id = request.args.get('cliente', '', type=str)
+    orden = request.args.get('orden', 'fecha_desc').strip()
+    pagina = request.args.get('pagina', 1, type=int)
+    por_pagina = 25
+
+    # Query base: pólizas del usuario actual
+    query = PolizaCliente.query.join(Cliente).filter(
+        Cliente.usuario_id == current_user.id
+    )
+
+    # Filtro por compañía
+    if compania_id and compania_id.isdigit():
+        query = query.filter(PolizaCliente.compania_id == int(compania_id))
+
+    # Filtro por tipo de seguro
+    if tipo_seguro:
+        query = query.filter(PolizaCliente.tipo_seguro == tipo_seguro)
+
+    # Filtro por estado
+    if estado:
+        query = query.filter(PolizaCliente.estado == estado)
+
+    # Filtro por cliente específico
+    if cliente_id and cliente_id.isdigit():
+        query = query.filter(PolizaCliente.cliente_id == int(cliente_id))
+
+    # Filtro por fecha de vigencia
+    if fecha_desde:
+        try:
+            fecha_desde_dt = datetime.strptime(fecha_desde, '%Y-%m-%d').date()
+            query = query.filter(PolizaCliente.fecha_vigencia_hasta >= fecha_desde_dt)
+        except ValueError:
+            pass
+
+    if fecha_hasta:
+        try:
+            fecha_hasta_dt = datetime.strptime(fecha_hasta, '%Y-%m-%d').date()
+            query = query.filter(PolizaCliente.fecha_vigencia_desde <= fecha_hasta_dt)
+        except ValueError:
+            pass
+
+    # Búsqueda por texto (número póliza, asegurado, patente, documento)
+    if busqueda:
+        patron = f'%{busqueda}%'
+        query = query.filter(
+            db.or_(
+                PolizaCliente.numero_poliza.ilike(patron),
+                PolizaCliente.asegurado_nombre.ilike(patron),
+                PolizaCliente.asegurado_documento.ilike(patron),
+                PolizaCliente.vehiculo_patente.ilike(patron),
+                PolizaCliente.vehiculo_marca.ilike(patron),
+                PolizaCliente.vehiculo_modelo.ilike(patron),
+                Cliente.nombre.ilike(patron),
+                Cliente.apellido.ilike(patron),
+                Cliente.documento_identidad.ilike(patron)
+            )
+        )
+
+    # Ordenamiento
+    if orden == 'fecha_desc':
+        query = query.order_by(PolizaCliente.fecha_vigencia_hasta.desc().nullslast())
+    elif orden == 'fecha_asc':
+        query = query.order_by(PolizaCliente.fecha_vigencia_hasta.asc().nullsfirst())
+    elif orden == 'numero':
+        query = query.order_by(PolizaCliente.numero_poliza.asc().nullslast())
+    elif orden == 'cliente':
+        query = query.order_by(Cliente.apellido.asc(), Cliente.nombre.asc())
+    elif orden == 'compania':
+        query = query.outerjoin(Compania).order_by(Compania.nombre.asc().nullslast())
+    elif orden == 'prima_desc':
+        query = query.order_by(PolizaCliente.prima_anual.desc().nullslast())
+    elif orden == 'prima_asc':
+        query = query.order_by(PolizaCliente.prima_anual.asc().nullsfirst())
+    elif orden == 'estado':
+        query = query.order_by(PolizaCliente.estado.asc())
+    elif orden == 'reciente':
+        query = query.order_by(PolizaCliente.fecha_asignacion.desc())
+    else:
+        query = query.order_by(PolizaCliente.fecha_vigencia_hasta.desc().nullslast())
+
+    # Paginación
+    total = query.count()
+    polizas_lista = query.offset((pagina - 1) * por_pagina).limit(por_pagina).all()
+    total_paginas = (total + por_pagina - 1) // por_pagina
+
+    # Datos para filtros
+    companias = Compania.query.filter(
+        Compania.id.in_(
+            db.session.query(PolizaCliente.compania_id).join(Cliente).filter(
+                Cliente.usuario_id == current_user.id,
+                PolizaCliente.compania_id.isnot(None)
+            ).distinct()
+        )
+    ).order_by(Compania.nombre).all()
+
+    # Estadísticas rápidas
+    stats = {
+        'total': total,
+        'activas': PolizaCliente.query.join(Cliente).filter(
+            Cliente.usuario_id == current_user.id,
+            PolizaCliente.estado == 'activa'
+        ).count(),
+        'vencidas': PolizaCliente.query.join(Cliente).filter(
+            Cliente.usuario_id == current_user.id,
+            PolizaCliente.estado == 'vencida'
+        ).count(),
+        'por_vencer': PolizaCliente.query.join(Cliente).filter(
+            Cliente.usuario_id == current_user.id,
+            PolizaCliente.estado == 'activa',
+            PolizaCliente.fecha_vigencia_hasta.isnot(None),
+            PolizaCliente.fecha_vigencia_hasta <= date.today() + timedelta(days=30),
+            PolizaCliente.fecha_vigencia_hasta >= date.today()
+        ).count()
+    }
+
+    return render_template('distribucion/polizas.html',
+                          polizas=polizas_lista,
+                          companias=companias,
+                          tipos_seguro=PolizaCliente.TIPOS_SEGURO,
+                          estados=PolizaCliente.ESTADOS,
+                          busqueda=busqueda,
+                          compania_id=compania_id,
+                          tipo_seguro=tipo_seguro,
+                          estado=estado,
+                          fecha_desde=fecha_desde,
+                          fecha_hasta=fecha_hasta,
+                          cliente_id=cliente_id,
+                          orden=orden,
+                          pagina=pagina,
+                          total_paginas=total_paginas,
+                          total=total,
+                          stats=stats)
 
 
 # ============================================================================
