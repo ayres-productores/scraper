@@ -409,3 +409,159 @@ Archivos modificados que deben respaldarse:
 - `templates/cuentas.html`
 - `templates/dashboard.html`
 - `templates/escaneo.html`
+
+---
+
+## Sesión 2026-02-28 (continuación) - Vista Representante y Usage Tracker
+
+### 4. Vista de Representante (Collaborator)
+
+Nuevo módulo para el rol `collaborator` que actúa como representante comercial.
+
+**Archivos creados:**
+```
+app/representante/
+├── __init__.py              # Blueprint
+├── routes.py                # Rutas del representante
+app/templates/representante/
+├── dashboard.html           # Panel con todas las pólizas
+├── poliza_detalle.html      # Detalle de póliza
+├── enviar_whatsapp.html     # Formulario envío
+├── registrar_pago.html      # Formulario pago
+└── enviar_resultado.html    # Resultado envío manual
+```
+
+**Rutas del representante:**
+```
+GET  /representante/                    # Dashboard con todas las pólizas
+GET  /representante/poliza/<id>         # Detalle de póliza
+GET/POST /representante/poliza/<id>/whatsapp  # Enviar WhatsApp
+GET/POST /representante/poliza/<id>/pago      # Registrar pago
+```
+
+**Características:**
+- Ve TODAS las pólizas del sistema (no solo las propias)
+- Columnas especiales: "Descargado por", "Cuenta Gmail", "Fecha descarga"
+- Filtros avanzados: por usuario que descargó, cuenta Gmail, fechas
+- Acciones: ver detalle, enviar WhatsApp, registrar pago, descargar PDF
+- Estadísticas: total, activas, por vencer, vencidas, sin contactar
+
+**Archivos modificados:**
+- `app/utils/decoradores.py` - Agregado `@collaborator_requerido`
+- `app/auth/routes.py` - Redirección condicional post-login
+- `app/main/routes.py` - Redirección de collaborator a su panel
+- `app/templates/base.html` - Menú diferenciado por rol
+- `app/__init__.py` - Registro del blueprint
+
+**Comportamiento por rol:**
+| Rol | `/` redirige a | `/dashboard` | `/representante/` |
+|-----|---------------|--------------|-------------------|
+| admin | /dashboard | OK | Bloqueado |
+| poweruser | /dashboard | OK | Bloqueado |
+| collaborator | /representante/ | → /representante/ | OK |
+
+### 5. Sistema de Usage Tracker (Heatmap)
+
+Módulo reutilizable para tracking de uso y generación de heatmaps mensuales.
+
+**Archivos creados:**
+```
+app/usage_tracker/
+├── __init__.py              # UsageTracker class (extensión Flask)
+├── models.py                # Modelo EventoUso
+├── routes.py                # API + Panel analytics
+└── templates/usage_tracker/
+    └── analytics.html       # Dashboard de analytics
+app/static/js/
+└── click-tracker.js         # Script de tracking (batch + sendBeacon)
+```
+
+**Modelo EventoUso:**
+```python
+EventoUso
+├── id, fecha, mes (YYYY-MM)
+├── pagina, elemento, elemento_id, elemento_texto
+├── accion (click, submit, etc.)
+├── posicion_x, posicion_y, viewport_width, viewport_height
+└── Métodos: registrar(), estadisticas_paginas(), estadisticas_elementos(),
+             datos_heatmap(), meses_disponibles(), limpiar_antiguos()
+```
+
+**Rutas de analytics:**
+```
+POST /analytics/track          # Recibe eventos del frontend
+GET  /analytics/               # Panel de analytics (solo admin)
+GET  /analytics/heatmap-data   # API para datos de heatmap (AJAX)
+POST /analytics/limpiar        # Limpieza de datos antiguos
+```
+
+**Características:**
+- Tracking automático de clics en: `a`, `button`, `.btn`, `.nav-link`, `[data-track]`
+- Batch de eventos (10 clics o 5 segundos)
+- Envío no bloqueante con `navigator.sendBeacon`
+- Panel con estadísticas por página y por elemento
+- Heatmap visual usando heatmap.js
+- Selector de mes y limpieza de datos antiguos
+
+**Configuración (config.py):**
+```python
+USAGE_TRACKER_ENABLED = True
+USAGE_TRACKER_ENDPOINT = '/api/analytics/track'
+USAGE_TRACKER_BATCH_SIZE = 10
+USAGE_TRACKER_BATCH_TIMEOUT = 5000
+USAGE_TRACKER_TRACK_ELEMENTS = 'a, button, .btn, .nav-link, [data-track]'
+USAGE_TRACKER_EXCLUDE_PATHS = ['/static/', '/api/analytics/']
+```
+
+**Para reutilizar en otro proyecto Flask:**
+```python
+# 1. Copiar carpeta app/usage_tracker/ y app/static/js/click-tracker.js
+# 2. En __init__.py:
+from app.usage_tracker import UsageTracker
+UsageTracker(app)
+
+# 3. Incluir script en base.html:
+<script src="{{ url_for('static', filename='js/click-tracker.js') }}"></script>
+```
+
+**Archivos modificados:**
+- `app/__init__.py` - Inicializa UsageTracker, exime de CSRF
+- `app/templates/base.html` - Incluye click-tracker.js, menú Admin con dropdown
+
+### Estructura Actualizada de Directorios
+
+```
+app/
+├── representante/           # NUEVO - Vista para collaborators
+│   ├── __init__.py
+│   └── routes.py
+├── usage_tracker/           # NUEVO - Módulo de analytics reutilizable
+│   ├── __init__.py
+│   ├── models.py
+│   ├── routes.py
+│   └── templates/usage_tracker/
+│       └── analytics.html
+├── static/js/
+│   ├── main.js
+│   ├── tracking-extraccion.js
+│   └── click-tracker.js     # NUEVO - Script de tracking
+└── templates/
+    └── representante/       # NUEVO - Templates del representante
+        ├── dashboard.html
+        ├── poliza_detalle.html
+        ├── enviar_whatsapp.html
+        ├── registrar_pago.html
+        └── enviar_resultado.html
+```
+
+### Blueprints Actuales
+
+| Blueprint | Prefijo | Descripción |
+|-----------|---------|-------------|
+| auth | / | Autenticación |
+| main | / | Dashboard y archivos |
+| admin | /admin | Administración |
+| distribucion | /distribucion | CRM y pólizas |
+| api | /api | APIs y webhooks |
+| representante | /representante | Vista collaborator |
+| usage_tracker | /analytics | Tracking de uso |

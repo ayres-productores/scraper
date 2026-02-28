@@ -85,6 +85,7 @@ def create_app(config_class=None):
     from app.admin.routes import admin_bp
     from app.distribucion.routes import distribucion_bp
     from app.api.routes import api_bp
+    from app.representante import representante_bp
     _diag("Blueprints importados OK")
 
     _diag("Registrando blueprints...")
@@ -93,10 +94,18 @@ def create_app(config_class=None):
     app.register_blueprint(admin_bp, url_prefix='/admin')
     app.register_blueprint(distribucion_bp, url_prefix='/distribucion')
     app.register_blueprint(api_bp, url_prefix='/api')
+    app.register_blueprint(representante_bp)
     _diag("Blueprints registrados OK")
 
-    # Eximir webhook de WhatsApp de CSRF (recibe POSTs de Meta)
+    # Inicializar Usage Tracker (módulo reutilizable de analytics)
+    _diag("Inicializando Usage Tracker...")
+    from app.usage_tracker import UsageTracker, usage_tracker_bp
+    UsageTracker(app)
+    _diag("Usage Tracker inicializado OK")
+
+    # Eximir endpoints de CSRF (reciben POSTs externos)
     csrf.exempt(api_bp)
+    csrf.exempt(usage_tracker_bp)  # Tracking endpoint recibe POSTs del frontend
 
     # Crear tablas y usuario admin por defecto
     _diag("Creando contexto de app y tablas...")

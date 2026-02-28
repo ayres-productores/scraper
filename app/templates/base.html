@@ -12,12 +12,29 @@
     {% if current_user.is_authenticated and not current_user.debe_cambiar_contrasena %}
     <nav class="navbar">
         <div class="navbar-brand">
+            {% if current_user.es_collaborator() %}
+            <a href="{{ url_for('representante.index') }}">
+                <span class="logo-icon">&#128203;</span>
+                Portal de Seguros
+            </a>
+            {% else %}
             <a href="{{ url_for('main.dashboard') }}">
                 <span class="logo-icon">&#128203;</span>
                 Portal de Seguros
             </a>
+            {% endif %}
         </div>
         <div class="navbar-menu">
+            {% if current_user.es_collaborator() %}
+            <!-- Menu para Representante (Collaborator) -->
+            <a href="{{ url_for('representante.index') }}" class="nav-link {% if 'representante' in request.endpoint %}active{% endif %}">
+                Mi Panel
+            </a>
+            <a href="{{ url_for('main.archivos') }}" class="nav-link {% if request.endpoint == 'main.archivos' %}active{% endif %}">
+                Archivos
+            </a>
+            {% else %}
+            <!-- Menu para Admin y PowerUser -->
             <a href="{{ url_for('main.dashboard') }}" class="nav-link {% if request.endpoint == 'main.dashboard' %}active{% endif %}">
                 Dashboard
             </a>
@@ -76,9 +93,18 @@
             </div>
 
             {% if current_user.es_admin() %}
-            <a href="{{ url_for('admin.index') }}" class="nav-link nav-admin {% if 'admin' in request.endpoint %}active{% endif %}">
-                Admin
-            </a>
+            <div class="nav-dropdown">
+                <a href="{{ url_for('admin.index') }}" class="nav-link nav-admin {% if 'admin' in request.endpoint or 'usage_tracker' in request.endpoint %}active{% endif %}">
+                    Admin <span class="dropdown-arrow">&#9662;</span>
+                </a>
+                <div class="nav-dropdown-menu">
+                    <a href="{{ url_for('admin.index') }}">Panel Admin</a>
+                    <a href="{{ url_for('admin.usuarios') }}">Usuarios</a>
+                    <hr>
+                    <a href="{{ url_for('usage_tracker.dashboard') }}">Analytics de Uso</a>
+                </div>
+            </div>
+            {% endif %}
             {% endif %}
         </div>
         <div class="navbar-user">
@@ -132,6 +158,7 @@
             window.open(getExtractorUrl(path), '_blank');
         }
     </script>
+    <script src="{{ url_for('static', filename='js/click-tracker.js') }}"></script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
     {% block extra_js %}{% endblock %}
 </body>

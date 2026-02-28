@@ -61,6 +61,24 @@ def gestor_usuarios_requerido(f):
     return decorated_function
 
 
+def collaborator_requerido(f):
+    """
+    Decorador que requiere rol de collaborator (representante).
+    Redirige a dashboard si no tiene el rol correcto.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return redirect(url_for('auth.login'))
+        if not current_user.es_collaborator():
+            flash('Acceso denegado. Esta vista es solo para representantes.', 'danger')
+            return redirect(url_for('main.dashboard'))
+        if current_user.debe_cambiar_contrasena:
+            return redirect(url_for('auth.cambiar_contrasena_obligatorio'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
 def propietario_requerido(modelo, id_param='id', campo_usuario='usuario_id'):
     """
     Decorador que verifica que el recurso pertenezca al usuario actual.

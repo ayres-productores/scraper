@@ -62,6 +62,10 @@ def login():
                 next_page = request.args.get('next')
                 if next_page and next_page.startswith('/'):
                     return redirect(next_page)
+
+                # Redirección condicional según rol
+                if usuario.es_collaborator():
+                    return redirect(url_for('representante.index'))
                 return redirect(url_for('main.dashboard'))
             else:
                 usuario.registrar_intento_fallido()

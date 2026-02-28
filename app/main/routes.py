@@ -23,6 +23,9 @@ main_bp = Blueprint('main', __name__)
 def index():
     """Página principal - redirige al dashboard o login."""
     if current_user.is_authenticated:
+        # Collaborators van a su panel específico
+        if current_user.es_collaborator():
+            return redirect(url_for('representante.index'))
         return redirect(url_for('main.dashboard'))
     return redirect(url_for('auth.login'))
 
@@ -33,6 +36,10 @@ def dashboard():
     """Panel principal del usuario."""
     if current_user.debe_cambiar_contrasena:
         return redirect(url_for('auth.cambiar_contrasena_obligatorio'))
+
+    # Collaborators no acceden al dashboard general
+    if current_user.es_collaborator():
+        return redirect(url_for('representante.index'))
 
     # Estadísticas del usuario
     total_cuentas = current_user.cuentas_gmail.filter_by(activa=True).count()

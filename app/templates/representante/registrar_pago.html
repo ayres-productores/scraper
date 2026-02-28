@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}Registrar Pago - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Registrar Pago</h1>
+        <p class="text-muted">Póliza {{ poliza.numero_poliza or '#' ~ poliza.id }}</p>
+    </div>
+    <div class="header-actions">
+        <a href="{{ url_for('representante.poliza_detalle', poliza_id=poliza.id) }}" class="btn btn-outline">&larr; Volver</a>
+    </div>
+</div>
+
+<div class="grid-2">
+    <div class="card">
+        <div class="card-header">
+            <h3>Nuevo Pago</h3>
+        </div>
+        <div class="card-body">
+            <form method="POST">
+                {{ form.hidden_tag() }}
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="numero_cuota">Número de Cuota</label>
+                        {{ form.numero_cuota(class="form-control") }}
+                        {% if form.numero_cuota.errors %}
+                        <div class="error-msg">{{ form.numero_cuota.errors[0] }}</div>
+                        {% endif %}
+                    </div>
+
+                    <div class="form-group">
+                        <label for="monto">Monto</label>
+                        {{ form.monto(class="form-control", placeholder="$") }}
+                        {% if form.monto.errors %}
+                        <div class="error-msg">{{ form.monto.errors[0] }}</div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="fecha_vencimiento">Fecha Vencimiento</label>
+                        {{ form.fecha_vencimiento(class="form-control", type="date") }}
+                    </div>
+
+                    <div class="form-group">
+                        <label for="fecha_pago">Fecha de Pago</label>
+                        {{ form.fecha_pago(class="form-control", type="date") }}
+                        <small class="text-muted">Dejar vacío si aún no se pagó</small>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="medio_pago">Medio de Pago</label>
+                    {{ form.medio_pago(class="form-control") }}
+                </div>
+
+                <div class="form-group">
+                    <label for="comprobante">Comprobante</label>
+                    {{ form.comprobante(class="form-control", placeholder="Número o referencia del comprobante") }}
+                </div>
+
+                <div class="form-group">
+                    <label for="notas">Notas</label>
+                    {{ form.notas(class="form-control", rows=3) }}
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Registrar Pago</button>
+                    <a href="{{ url_for('representante.poliza_detalle', poliza_id=poliza.id) }}" class="btn btn-outline">Cancelar</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3>Pagos Registrados</h3>
+        </div>
+        <div class="card-body">
+            {% if pagos %}
+            <div class="pagos-lista">
+                {% for pago in pagos %}
+                <div class="pago-item">
+                    <div class="pago-cuota">Cuota {{ pago.numero_cuota }}</div>
+                    <div class="pago-monto">${{ "{:,.0f}".format(pago.monto) if pago.monto else '-' }}</div>
+                    <div class="pago-estado">
+                        <span class="badge badge-{% if pago.estado == 'pagado' %}success{% elif pago.estado == 'vencido' %}danger{% else %}warning{% endif %}">
+                            {{ pago.estado }}
+                        </span>
+                    </div>
+                    {% if pago.fecha_pago %}
+                    <div class="pago-fecha">{{ pago.fecha_pago.strftime('%d/%m/%Y') }}</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-muted text-center">Sin pagos registrados</p>
+            {% endif %}
+
+            {% if poliza.prima_anual %}
+            <div class="resumen-prima">
+                <strong>Prima Anual:</strong> ${{ "{:,.0f}".format(poliza.prima_anual) }}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.grid-2 {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 1.5rem;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.form-group {
+    margin-bottom: 1rem;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+.form-actions {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+.error-msg {
+    color: var(--danger);
+    font-size: 0.85rem;
+    margin-top: 0.25rem;
+}
+
+.pagos-lista {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.pago-item {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem;
+    background: var(--light);
+    border-radius: var(--radius-sm);
+}
+
+.pago-cuota {
+    font-weight: 600;
+    min-width: 70px;
+}
+
+.pago-monto {
+    flex: 1;
+}
+
+.pago-fecha {
+    font-size: 0.85rem;
+    color: var(--gray);
+}
+
+.resumen-prima {
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--light);
+    text-align: right;
+}
+
+@media (max-width: 768px) {
+    .grid-2 {
+        grid-template-columns: 1fr;
+    }
+
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+{% endblock %}

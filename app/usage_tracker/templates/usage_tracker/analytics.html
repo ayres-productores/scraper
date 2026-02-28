@@ -1,0 +1,422 @@
+{% extends "base.html" %}
+{% block title %}Analytics de Uso - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Analytics de Uso</h1>
+        <p class="text-muted">Heatmap de uso mensual para identificar features</p>
+    </div>
+    <div class="header-actions">
+        <form method="GET" class="mes-selector">
+            <label>Mes:</label>
+            <select name="mes" onchange="this.form.submit()">
+                {% for m in meses_disponibles %}
+                <option value="{{ m }}" {% if m == mes %}selected{% endif %}>{{ m }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+</div>
+
+<!-- Estadísticas Generales -->
+<div class="stats-row">
+    <div class="stat-card">
+        <div class="stat-value">{{ total_clics }}</div>
+        <div class="stat-label">Total Clics</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ uso_paginas|length }}</div>
+        <div class="stat-label">Páginas Visitadas</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ uso_elementos|length }}</div>
+        <div class="stat-label">Elementos Únicos</div>
+    </div>
+</div>
+
+<div class="analytics-grid">
+    <!-- Uso por Página -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Uso por Página</h3>
+        </div>
+        <div class="card-body">
+            {% if uso_paginas %}
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Página</th>
+                            <th>Clics</th>
+                            <th>%</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for pagina, clics in uso_paginas %}
+                        {% set porcentaje = (clics / total_clics * 100) if total_clics > 0 else 0 %}
+                        <tr class="{% if clics == 0 %}row-sin-uso{% endif %}">
+                            <td>
+                                <code>{{ pagina }}</code>
+                            </td>
+                            <td>
+                                <strong>{{ clics }}</strong>
+                            </td>
+                            <td>
+                                <div class="progress-bar-mini">
+                                    <div class="progress-fill" style="width: {{ porcentaje }}%"></div>
+                                </div>
+                                <small>{{ "%.1f"|format(porcentaje) }}%</small>
+                            </td>
+                            <td>
+                                <a href="?mes={{ mes }}&pagina={{ pagina }}"
+                                   class="btn btn-xs btn-outline"
+                                   title="Ver heatmap">
+                                    &#128293;
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <span class="empty-icon">&#128202;</span>
+                <h3>Sin datos</h3>
+                <p>No hay datos de uso para este mes.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Uso por Elemento -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Top Elementos (Botones/Links)</h3>
+        </div>
+        <div class="card-body">
+            {% if uso_elementos %}
+            <div class="table-responsive elementos-tabla">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Elemento</th>
+                            <th>Página</th>
+                            <th>Clics</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for pagina, texto, clics in uso_elementos %}
+                        <tr>
+                            <td>
+                                <span class="elemento-texto">{{ texto[:40] }}{% if texto|length > 40 %}...{% endif %}</span>
+                            </td>
+                            <td>
+                                <small class="text-muted">{{ pagina }}</small>
+                            </td>
+                            <td>
+                                <span class="badge badge-primary">{{ clics }}</span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <span class="empty-icon">&#128065;</span>
+                <p>Sin datos de elementos</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Heatmap Visual -->
+{% if pagina_filtro %}
+<div class="card mt-4">
+    <div class="card-header">
+        <h3>Heatmap: <code>{{ pagina_filtro }}</code></h3>
+        <a href="?mes={{ mes }}" class="btn btn-sm btn-outline">Cerrar</a>
+    </div>
+    <div class="card-body">
+        <div class="heatmap-container" id="heatmap-container">
+            <div class="heatmap-placeholder">
+                <p>Representación visual de clics en esta página</p>
+                <p class="text-muted">Las zonas más calientes (rojas) indican mayor actividad</p>
+            </div>
+            <div id="heatmap" class="heatmap-canvas"></div>
+        </div>
+        <div class="heatmap-legend">
+            <span class="legend-cold">Poco uso</span>
+            <div class="legend-gradient"></div>
+            <span class="legend-hot">Mucho uso</span>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Selector de página para heatmap -->
+<div class="card mt-4">
+    <div class="card-header">
+        <h3>Ver Heatmap de Página</h3>
+    </div>
+    <div class="card-body">
+        <form method="GET" class="heatmap-form">
+            <input type="hidden" name="mes" value="{{ mes }}">
+            <div class="form-row">
+                <select name="pagina" class="form-control">
+                    <option value="">Seleccionar página...</option>
+                    {% for p in paginas %}
+                    <option value="{{ p }}" {% if p == pagina_filtro %}selected{% endif %}>{{ p }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="btn btn-primary">Ver Heatmap</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Limpieza de datos -->
+<div class="card mt-4">
+    <div class="card-header">
+        <h3>Mantenimiento</h3>
+    </div>
+    <div class="card-body">
+        <form id="form-limpiar" class="form-inline">
+            <label>Eliminar datos más antiguos que</label>
+            <select name="meses" class="form-control form-control-sm">
+                <option value="3">3 meses</option>
+                <option value="6" selected>6 meses</option>
+                <option value="12">12 meses</option>
+            </select>
+            <button type="submit" class="btn btn-sm btn-outline btn-danger">Limpiar</button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.analytics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+}
+
+.stats-row {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.stat-card {
+    background: white;
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    text-align: center;
+    box-shadow: var(--shadow-sm);
+    flex: 1;
+}
+
+.stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.stat-label {
+    font-size: 0.85rem;
+    color: var(--gray);
+    text-transform: uppercase;
+}
+
+.mes-selector {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.mes-selector select {
+    padding: 0.5rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--light);
+}
+
+.progress-bar-mini {
+    width: 60px;
+    height: 6px;
+    background: var(--light);
+    border-radius: 3px;
+    overflow: hidden;
+    display: inline-block;
+    vertical-align: middle;
+    margin-right: 0.5rem;
+}
+
+.progress-fill {
+    height: 100%;
+    background: var(--primary);
+    border-radius: 3px;
+}
+
+.row-sin-uso {
+    opacity: 0.5;
+    background: #fff5f5;
+}
+
+code {
+    background: var(--light);
+    padding: 0.125rem 0.375rem;
+    border-radius: 3px;
+    font-size: 0.85rem;
+}
+
+.elementos-tabla {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.elemento-texto {
+    font-weight: 500;
+}
+
+.heatmap-container {
+    position: relative;
+    width: 100%;
+    height: 500px;
+    background: #f5f5f5;
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+.heatmap-placeholder {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: var(--gray);
+}
+
+.heatmap-canvas {
+    width: 100%;
+    height: 100%;
+}
+
+.heatmap-legend {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    margin-top: 1rem;
+    font-size: 0.85rem;
+    color: var(--gray);
+}
+
+.legend-gradient {
+    width: 150px;
+    height: 12px;
+    background: linear-gradient(to right, #0000ff, #00ff00, #ffff00, #ff0000);
+    border-radius: 6px;
+}
+
+.heatmap-form .form-row {
+    display: flex;
+    gap: 1rem;
+}
+
+.heatmap-form select {
+    flex: 1;
+}
+
+.form-inline {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.mt-4 { margin-top: 1.5rem; }
+
+.empty-state {
+    text-align: center;
+    padding: 2rem;
+    color: var(--gray);
+}
+
+.empty-icon {
+    font-size: 2rem;
+    display: block;
+    margin-bottom: 0.5rem;
+}
+
+@media (max-width: 768px) {
+    .analytics-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .stats-row {
+        flex-direction: column;
+    }
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<!-- Heatmap.js para visualización -->
+<script src="https://cdn.jsdelivr.net/npm/heatmap.js@2.0.5/build/heatmap.min.js"></script>
+
+<script>
+{% if pagina_filtro and heatmap_data %}
+// Inicializar heatmap con datos del servidor
+document.addEventListener('DOMContentLoaded', function() {
+    const container = document.getElementById('heatmap');
+    if (!container) return;
+
+    const heatmapInstance = h337.create({
+        container: container,
+        radius: 40,
+        maxOpacity: 0.6,
+        minOpacity: 0.1,
+        blur: 0.75
+    });
+
+    const data = {{ heatmap_data | tojson }};
+
+    if (data.length > 0) {
+        const maxValue = Math.max(...data.map(p => p.value));
+        heatmapInstance.setData({
+            max: maxValue,
+            data: data
+        });
+    }
+});
+{% endif %}
+
+// Formulario de limpieza
+document.getElementById('form-limpiar')?.addEventListener('submit', function(e) {
+    e.preventDefault();
+
+    if (!confirm('¿Estás seguro de eliminar los datos antiguos?')) return;
+
+    const formData = new FormData(this);
+
+    fetch('{{ url_for("usage_tracker.limpiar_antiguos") }}', {
+        method: 'POST',
+        body: formData
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            alert(data.mensaje);
+            location.reload();
+        } else {
+            alert('Error: ' + data.error);
+        }
+    })
+    .catch(err => alert('Error: ' + err));
+});
+</script>
+{% endblock %}

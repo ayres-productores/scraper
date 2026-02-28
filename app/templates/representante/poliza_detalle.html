@@ -1,0 +1,317 @@
+{% extends "base.html" %}
+{% block title %}Póliza {{ poliza.numero_poliza or poliza.id }} - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Póliza {{ poliza.numero_poliza or '#' ~ poliza.id }}</h1>
+        <p class="text-muted">
+            {{ poliza.tipo_seguro or 'Sin tipo' }} -
+            {% if poliza.compania %}{{ poliza.compania.nombre }}{% else %}Sin compañía{% endif %}
+        </p>
+    </div>
+    <div class="header-actions">
+        <a href="{{ url_for('representante.index') }}" class="btn btn-outline">&larr; Volver</a>
+        {% if poliza.cliente and poliza.cliente.telefono_whatsapp %}
+        <a href="{{ url_for('representante.enviar_whatsapp', poliza_id=poliza.id) }}" class="btn btn-success">
+            &#128172; Enviar WhatsApp
+        </a>
+        {% endif %}
+        <a href="{{ url_for('representante.registrar_pago', poliza_id=poliza.id) }}" class="btn btn-primary">
+            $ Registrar Pago
+        </a>
+    </div>
+</div>
+
+<div class="grid-2">
+    <!-- Datos de la Póliza -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Datos de la Póliza</h3>
+            <span class="badge badge-estado-{{ poliza.estado }}">{{ poliza.estado }}</span>
+        </div>
+        <div class="card-body">
+            <div class="info-grid">
+                <div class="info-item">
+                    <label>Número de Póliza</label>
+                    <span>{{ poliza.numero_poliza or '-' }}</span>
+                </div>
+                <div class="info-item">
+                    <label>Tipo de Seguro</label>
+                    <span>{{ poliza.tipo_seguro or '-' }}</span>
+                </div>
+                <div class="info-item">
+                    <label>Compañía</label>
+                    <span>{% if poliza.compania %}{{ poliza.compania.nombre }}{% else %}-{% endif %}</span>
+                </div>
+                <div class="info-item">
+                    <label>Prima Anual</label>
+                    <span>{% if poliza.prima_anual %}${{ "{:,.0f}".format(poliza.prima_anual) }}{% else %}-{% endif %}</span>
+                </div>
+                <div class="info-item">
+                    <label>Vigencia Desde</label>
+                    <span>{% if poliza.fecha_vigencia_desde %}{{ poliza.fecha_vigencia_desde.strftime('%d/%m/%Y') }}{% else %}-{% endif %}</span>
+                </div>
+                <div class="info-item">
+                    <label>Vigencia Hasta</label>
+                    <span>{% if poliza.fecha_vigencia_hasta %}{{ poliza.fecha_vigencia_hasta.strftime('%d/%m/%Y') }}{% else %}-{% endif %}</span>
+                </div>
+                {% set dias = poliza.dias_para_vencimiento() %}
+                {% if dias is not none %}
+                <div class="info-item info-full">
+                    <label>Días Restantes</label>
+                    <span class="{% if dias < 0 %}text-danger{% elif dias <= 30 %}text-warning{% else %}text-success{% endif %}">
+                        {% if dias < 0 %}Vencida hace {{ -dias }} días{% elif dias == 0 %}Vence hoy{% else %}{{ dias }} días{% endif %}
+                    </span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Datos del Cliente -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Datos del Cliente</h3>
+        </div>
+        <div class="card-body">
+            {% if poliza.cliente %}
+            <div class="info-grid">
+                <div class="info-item info-full">
+                    <label>Nombre</label>
+                    <span><strong>{{ poliza.cliente.nombre_completo }}</strong></span>
+                </div>
+                <div class="info-item">
+                    <label>Teléfono</label>
+                    <span>{{ poliza.cliente.telefono_whatsapp or '-' }}</span>
+                </div>
+                <div class="info-item">
+                    <label>Email</label>
+                    <span>{{ poliza.cliente.email or '-' }}</span>
+                </div>
+                <div class="info-item">
+                    <label>Documento</label>
+                    <span>{{ poliza.cliente.documento_identidad or '-' }}</span>
+                </div>
+            </div>
+            {% else %}
+            <p class="text-muted">Sin cliente asignado</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Info de Descarga -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Información de Descarga</h3>
+        </div>
+        <div class="card-body">
+            {% if poliza.archivo %}
+            <div class="info-grid">
+                <div class="info-item">
+                    <label>Descargado por</label>
+                    <span>
+                        {% if poliza.archivo.escaneo and poliza.archivo.escaneo.usuario %}
+                        <span class="badge badge-dark">{{ poliza.archivo.escaneo.usuario.nombre }}</span>
+                        {% else %}-{% endif %}
+                    </span>
+                </div>
+                <div class="info-item">
+                    <label>Cuenta Gmail</label>
+                    <span>{{ poliza.archivo.cuenta_origen or '-' }}</span>
+                </div>
+                <div class="info-item">
+                    <label>Fecha Descarga</label>
+                    <span>{% if poliza.archivo.fecha_descarga %}{{ poliza.archivo.fecha_descarga.strftime('%d/%m/%Y %H:%M') }}{% else %}-{% endif %}</span>
+                </div>
+                <div class="info-item">
+                    <label>Archivo</label>
+                    <span>
+                        <a href="{{ url_for('main.descargar_archivo', archivo_id=poliza.archivo.id) }}" target="_blank" class="btn btn-xs btn-outline">
+                            &#128196; {{ poliza.archivo.nombre_archivo[:30] }}...
+                        </a>
+                    </span>
+                </div>
+            </div>
+            {% else %}
+            <p class="text-muted">Sin archivo asociado</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Datos del Asegurado -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Datos del Asegurado</h3>
+        </div>
+        <div class="card-body">
+            <div class="info-grid">
+                <div class="info-item">
+                    <label>Nombre</label>
+                    <span>{{ poliza.asegurado_nombre or '-' }}</span>
+                </div>
+                <div class="info-item">
+                    <label>Documento</label>
+                    <span>{{ poliza.asegurado_documento or '-' }}</span>
+                </div>
+                <div class="info-item info-full">
+                    <label>Dirección</label>
+                    <span>{{ poliza.asegurado_direccion or '-' }}</span>
+                </div>
+                <div class="info-item">
+                    <label>Teléfono</label>
+                    <span>{{ poliza.asegurado_telefono or '-' }}</span>
+                </div>
+                <div class="info-item">
+                    <label>Email</label>
+                    <span>{{ poliza.asegurado_email or '-' }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Historial de Envíos -->
+<div class="card mt-4">
+    <div class="card-header">
+        <h3>Historial de Envíos WhatsApp</h3>
+    </div>
+    <div class="card-body">
+        {% if envios %}
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Fecha</th>
+                        <th>Estado</th>
+                        <th>Mensaje</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for envio in envios %}
+                    <tr>
+                        <td>{{ envio.fecha_envio.strftime('%d/%m/%Y %H:%M') if envio.fecha_envio else '-' }}</td>
+                        <td>
+                            <span class="badge badge-{% if envio.estado == 'enviado' %}success{% elif envio.estado == 'error' %}danger{% else %}warning{% endif %}">
+                                {{ envio.estado }}
+                            </span>
+                            {% if envio.estado_mensaje %}
+                            <small class="d-block text-muted">{{ envio.estado_mensaje }}</small>
+                            {% endif %}
+                        </td>
+                        <td><small>{{ envio.mensaje_enviado[:100] }}{% if envio.mensaje_enviado|length > 100 %}...{% endif %}</small></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted text-center">Sin envíos registrados</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Pagos -->
+<div class="card mt-4">
+    <div class="card-header">
+        <h3>Pagos</h3>
+        <a href="{{ url_for('representante.registrar_pago', poliza_id=poliza.id) }}" class="btn btn-sm btn-primary">+ Registrar Pago</a>
+    </div>
+    <div class="card-body">
+        {% if pagos %}
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Cuota</th>
+                        <th>Monto</th>
+                        <th>Vencimiento</th>
+                        <th>Fecha Pago</th>
+                        <th>Estado</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for pago in pagos %}
+                    <tr>
+                        <td>{{ pago.numero_cuota }}</td>
+                        <td>${{ "{:,.0f}".format(pago.monto) if pago.monto else '-' }}</td>
+                        <td>{{ pago.fecha_vencimiento.strftime('%d/%m/%Y') if pago.fecha_vencimiento else '-' }}</td>
+                        <td>{{ pago.fecha_pago.strftime('%d/%m/%Y') if pago.fecha_pago else '-' }}</td>
+                        <td>
+                            <span class="badge badge-{% if pago.estado == 'pagado' %}success{% elif pago.estado == 'vencido' %}danger{% else %}warning{% endif %}">
+                                {{ pago.estado }}
+                            </span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted text-center">Sin pagos registrados</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.grid-2 {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+}
+
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+}
+
+.info-item {
+    padding: 0.5rem 0;
+}
+
+.info-item.info-full {
+    grid-column: span 2;
+}
+
+.info-item label {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--gray);
+    text-transform: uppercase;
+    margin-bottom: 0.25rem;
+}
+
+.info-item span {
+    font-size: 0.95rem;
+}
+
+.text-danger { color: var(--danger); }
+.text-warning { color: var(--warning); }
+.text-success { color: var(--success); }
+
+.mt-4 { margin-top: 1.5rem; }
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+@media (max-width: 768px) {
+    .grid-2 {
+        grid-template-columns: 1fr;
+    }
+
+    .info-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .info-item.info-full {
+        grid-column: span 1;
+    }
+}
+</style>
+{% endblock %}

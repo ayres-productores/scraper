@@ -1,0 +1,476 @@
+{% extends "base.html" %}
+{% block title %}Panel Representante - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Panel del Representante</h1>
+        <p class="text-muted">Vista de todas las pólizas del sistema</p>
+    </div>
+</div>
+
+<!-- Estadísticas -->
+<div class="stats-row">
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.total }}</div>
+        <div class="stat-label">Total Pólizas</div>
+    </div>
+    <div class="stat-card stat-success">
+        <div class="stat-value">{{ stats.activas }}</div>
+        <div class="stat-label">Activas</div>
+    </div>
+    <div class="stat-card stat-warning">
+        <div class="stat-value">{{ stats.por_vencer }}</div>
+        <div class="stat-label">Por Vencer (30d)</div>
+    </div>
+    <div class="stat-card stat-danger">
+        <div class="stat-value">{{ stats.vencidas }}</div>
+        <div class="stat-label">Vencidas</div>
+    </div>
+    <div class="stat-card stat-info">
+        <div class="stat-value">{{ stats.sin_contactar }}</div>
+        <div class="stat-label">Sin Contactar</div>
+    </div>
+</div>
+
+<!-- Filtros -->
+<div class="card filtros-card">
+    <form method="GET" id="filtros-form">
+        <div class="filtros-grid">
+            <div class="filtro-item filtro-busqueda">
+                <label>Buscar</label>
+                <input type="text" name="q" class="form-control"
+                       value="{{ filtros.q }}"
+                       placeholder="N° póliza, cliente, patente, documento...">
+            </div>
+
+            <div class="filtro-item">
+                <label>Compañía</label>
+                <select name="compania" class="form-control" onchange="this.form.submit()">
+                    <option value="">Todas</option>
+                    {% for c in companias %}
+                    <option value="{{ c.id }}" {% if filtros.compania == c.id %}selected{% endif %}>
+                        {{ c.nombre }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="filtro-item">
+                <label>Estado</label>
+                <select name="estado" class="form-control" onchange="this.form.submit()">
+                    <option value="">Todos</option>
+                    <option value="activa" {% if filtros.estado == 'activa' %}selected{% endif %}>Activa</option>
+                    <option value="vencida" {% if filtros.estado == 'vencida' %}selected{% endif %}>Vencida</option>
+                    <option value="en_renovacion" {% if filtros.estado == 'en_renovacion' %}selected{% endif %}>En Renovación</option>
+                    <option value="cancelada" {% if filtros.estado == 'cancelada' %}selected{% endif %}>Cancelada</option>
+                    <option value="suspendida" {% if filtros.estado == 'suspendida' %}selected{% endif %}>Suspendida</option>
+                </select>
+            </div>
+
+            <div class="filtro-item">
+                <label>Tipo Seguro</label>
+                <select name="tipo" class="form-control" onchange="this.form.submit()">
+                    <option value="">Todos</option>
+                    {% for t in tipos_seguro %}
+                    <option value="{{ t }}" {% if filtros.tipo == t %}selected{% endif %}>{{ t }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="filtro-item">
+                <label>Descargado por</label>
+                <select name="usuario" class="form-control" onchange="this.form.submit()">
+                    <option value="">Todos</option>
+                    {% for u in usuarios %}
+                    <option value="{{ u.id }}" {% if filtros.usuario == u.id %}selected{% endif %}>
+                        {{ u.nombre }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="filtro-item">
+                <label>Cuenta Gmail</label>
+                <select name="cuenta" class="form-control" onchange="this.form.submit()">
+                    <option value="">Todas</option>
+                    {% for c in cuentas %}
+                    <option value="{{ c }}" {% if filtros.cuenta == c %}selected{% endif %}>{{ c }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="filtro-item">
+                <label>Descarga desde</label>
+                <input type="date" name="fecha_desde" class="form-control"
+                       value="{{ filtros.fecha_desde }}" onchange="this.form.submit()">
+            </div>
+
+            <div class="filtro-item">
+                <label>Descarga hasta</label>
+                <input type="date" name="fecha_hasta" class="form-control"
+                       value="{{ filtros.fecha_hasta }}" onchange="this.form.submit()">
+            </div>
+
+            <div class="filtro-item">
+                <label>&nbsp;</label>
+                <label class="checkbox-label">
+                    <input type="checkbox" name="sin_envio" value="1"
+                           {% if filtros.sin_envio %}checked{% endif %}
+                           onchange="this.form.submit()">
+                    Solo sin envío WhatsApp
+                </label>
+            </div>
+
+            <div class="filtro-item filtro-botones">
+                <label>&nbsp;</label>
+                <div class="btn-group">
+                    <button type="submit" class="btn btn-primary">Buscar</button>
+                    <a href="{{ url_for('representante.index') }}" class="btn btn-outline">Limpiar</a>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+<!-- Tabla de Pólizas -->
+<div class="card">
+    <div class="card-header">
+        <span><strong>{{ paginacion.total }}</strong> póliza(s) encontrada(s)</span>
+    </div>
+    <div class="card-body">
+        {% if polizas %}
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>N° Póliza</th>
+                        <th>Cliente</th>
+                        <th>Compañía</th>
+                        <th>Vigencia</th>
+                        <th>Descargado por</th>
+                        <th>Cuenta Gmail</th>
+                        <th>Fecha Descarga</th>
+                        <th>Estado</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for poliza in polizas %}
+                    {% set dias = poliza.dias_para_vencimiento() %}
+                    <tr class="{% if poliza.estado == 'vencida' %}row-vencida{% elif dias is not none and dias <= 30 %}row-por-vencer{% endif %}">
+                        <td>
+                            <div class="numero-poliza">{{ poliza.numero_poliza or '-' }}</div>
+                            <small class="text-muted">{{ poliza.tipo_seguro or '' }}</small>
+                        </td>
+                        <td>
+                            {% if poliza.cliente %}
+                            <strong>{{ poliza.cliente.nombre_completo }}</strong>
+                            <br><small class="text-muted">{{ poliza.cliente.telefono_whatsapp or '' }}</small>
+                            {% else %}
+                            <span class="text-muted">Sin cliente</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if poliza.compania %}
+                            <span class="badge badge-compania">{{ poliza.compania.nombre }}</span>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if poliza.fecha_vigencia_desde and poliza.fecha_vigencia_hasta %}
+                            <div class="vigencia">
+                                <span class="fecha-desde">{{ poliza.fecha_vigencia_desde.strftime('%d/%m/%Y') }}</span>
+                                <span class="fecha-separador">-</span>
+                                <span class="fecha-hasta">{{ poliza.fecha_vigencia_hasta.strftime('%d/%m/%Y') }}</span>
+                            </div>
+                            {% if dias is not none %}
+                            <small class="dias-restantes {% if dias < 0 %}vencido{% elif dias <= 7 %}urgente{% elif dias <= 30 %}proximo{% endif %}">
+                                {% if dias < 0 %}
+                                Vencida hace {{ -dias }} días
+                                {% elif dias == 0 %}
+                                Vence hoy
+                                {% else %}
+                                {{ dias }} días restantes
+                                {% endif %}
+                            </small>
+                            {% endif %}
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if poliza.archivo and poliza.archivo.escaneo and poliza.archivo.escaneo.usuario %}
+                            <span class="badge badge-dark">{{ poliza.archivo.escaneo.usuario.nombre }}</span>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if poliza.archivo and poliza.archivo.cuenta_origen %}
+                            <small>{{ poliza.archivo.cuenta_origen }}</small>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if poliza.archivo and poliza.archivo.fecha_descarga %}
+                            {{ poliza.archivo.fecha_descarga.strftime('%d/%m/%Y %H:%M') }}
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge badge-estado-{{ poliza.estado }}">{{ poliza.estado }}</span>
+                        </td>
+                        <td class="acciones">
+                            <a href="{{ url_for('representante.poliza_detalle', poliza_id=poliza.id) }}"
+                               class="btn btn-xs btn-outline" title="Ver detalle">
+                                &#128065;
+                            </a>
+                            {% if poliza.cliente and poliza.cliente.telefono_whatsapp %}
+                            <a href="{{ url_for('representante.enviar_whatsapp', poliza_id=poliza.id) }}"
+                               class="btn btn-xs btn-success" title="Enviar WhatsApp">
+                                &#128172;
+                            </a>
+                            {% endif %}
+                            <a href="{{ url_for('representante.registrar_pago', poliza_id=poliza.id) }}"
+                               class="btn btn-xs btn-primary" title="Registrar pago">
+                                $
+                            </a>
+                            {% if poliza.archivo %}
+                            <a href="{{ url_for('main.descargar_archivo', archivo_id=poliza.archivo.id) }}"
+                               class="btn btn-xs btn-outline" title="Descargar PDF" target="_blank">
+                                &#128196;
+                            </a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Paginación -->
+        {% if paginacion.pages > 1 %}
+        <div class="paginacion">
+            {% if paginacion.has_prev %}
+            <a href="{{ url_for('representante.index', pagina=paginacion.prev_num, **filtros) }}"
+               class="btn btn-sm btn-outline">&larr; Anterior</a>
+            {% endif %}
+
+            <div class="paginas-numeros">
+                {% for p in paginacion.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                    {% if p %}
+                        {% if p == paginacion.page %}
+                        <span class="pagina-actual">{{ p }}</span>
+                        {% else %}
+                        <a href="{{ url_for('representante.index', pagina=p, **filtros) }}"
+                           class="pagina-link">{{ p }}</a>
+                        {% endif %}
+                    {% else %}
+                    <span class="pagina-ellipsis">...</span>
+                    {% endif %}
+                {% endfor %}
+            </div>
+
+            {% if paginacion.has_next %}
+            <a href="{{ url_for('representante.index', pagina=paginacion.next_num, **filtros) }}"
+               class="btn btn-sm btn-outline">Siguiente &rarr;</a>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% else %}
+        <div class="empty-state">
+            <span class="empty-icon">&#128269;</span>
+            <h3>Sin resultados</h3>
+            <p>No se encontraron pólizas con los filtros seleccionados.</p>
+            <a href="{{ url_for('representante.index') }}" class="btn btn-primary">Limpiar filtros</a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.stats-row {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+
+.stat-card {
+    background: white;
+    border-radius: var(--radius);
+    padding: 1rem 1.5rem;
+    text-align: center;
+    box-shadow: var(--shadow-sm);
+    border-left: 4px solid var(--primary);
+    flex: 1;
+    min-width: 150px;
+}
+
+.stat-card.stat-success { border-left-color: var(--success); }
+.stat-card.stat-warning { border-left-color: var(--warning); }
+.stat-card.stat-danger { border-left-color: var(--danger); }
+.stat-card.stat-info { border-left-color: #17a2b8; }
+
+.stat-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--dark);
+}
+
+.stat-label {
+    font-size: 0.8rem;
+    color: var(--gray);
+    text-transform: uppercase;
+}
+
+.filtros-card {
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+}
+
+.filtros-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+    align-items: end;
+}
+
+.filtro-busqueda {
+    grid-column: span 2;
+}
+
+.filtro-botones .btn-group {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    height: 38px;
+}
+
+.numero-poliza {
+    font-weight: 600;
+    color: var(--primary);
+}
+
+.vigencia {
+    white-space: nowrap;
+}
+
+.fecha-separador {
+    margin: 0 0.25rem;
+    color: var(--gray);
+}
+
+.dias-restantes {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--gray);
+}
+
+.dias-restantes.vencido { color: var(--danger); font-weight: 600; }
+.dias-restantes.urgente { color: var(--danger); }
+.dias-restantes.proximo { color: var(--warning); }
+
+.row-vencida {
+    background-color: rgba(220, 53, 69, 0.05);
+}
+
+.row-por-vencer {
+    background-color: rgba(255, 193, 7, 0.05);
+}
+
+.badge-compania {
+    background-color: var(--secondary);
+    color: white;
+}
+
+.badge-estado-activa { background-color: var(--success); color: white; }
+.badge-estado-vencida { background-color: var(--danger); color: white; }
+.badge-estado-en_renovacion { background-color: var(--warning); color: var(--dark); }
+.badge-estado-cancelada { background-color: var(--gray); color: white; }
+.badge-estado-suspendida { background-color: #6c757d; color: white; }
+
+.acciones {
+    white-space: nowrap;
+}
+
+.acciones .btn-xs {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+    margin-right: 0.25rem;
+}
+
+.paginacion {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--light);
+}
+
+.paginas-numeros {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.pagina-actual {
+    background: var(--primary);
+    color: white;
+    padding: 0.25rem 0.75rem;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+}
+
+.pagina-link {
+    padding: 0.25rem 0.75rem;
+    color: var(--primary);
+    text-decoration: none;
+}
+
+.pagina-link:hover {
+    background: var(--light);
+    border-radius: var(--radius-sm);
+}
+
+.pagina-ellipsis {
+    color: var(--gray);
+}
+
+.empty-state {
+    text-align: center;
+    padding: 3rem;
+}
+
+.empty-icon {
+    font-size: 3rem;
+    display: block;
+    margin-bottom: 1rem;
+}
+
+@media (max-width: 768px) {
+    .filtro-busqueda {
+        grid-column: span 1;
+    }
+
+    .stats-row {
+        flex-direction: column;
+    }
+}
+</style>
+{% endblock %}
