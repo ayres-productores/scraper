@@ -3,6 +3,13 @@ Módulo para evaluación de clientes actuales.
 Identifica clientes que necesitan reactivación basándose en:
 1. Comunicación exitosa en últimos 6 meses
 2. Póliza emitida/vigente en el último año
+
+NOTA: Este módulo puede ejecutarse desde:
+- Contexto web (request de Flask) - usa db.session normal
+- Contexto background (scheduler/thread) - usa thread_session
+
+Todas las funciones aceptan un parámetro opcional `session` para permitir
+inyección de sesión en contextos thread-safe.
 """
 
 from datetime import datetime
@@ -10,19 +17,37 @@ from app import db
 from app.models import Cliente, AlertaVencimiento
 
 
-def evaluar_clientes_actuales(usuario_id=None):
+def _get_session(session=None):
+    """
+    Obtiene la sesión de BD apropiada para el contexto actual.
+
+    Args:
+        session: Sesión explícita (para threads). Si None, usa db.session.
+
+    Returns:
+        Sesión SQLAlchemy a usar
+    """
+    if session is not None:
+        return session
+    return db.session
+
+
+def evaluar_clientes_actuales(usuario_id=None, session=None):
     """
     Evalúa todos los clientes y actualiza su estado 'actual'.
     Genera alertas para clientes que dejaron de ser actuales.
 
     Args:
         usuario_id: ID del usuario (None para todos los usuarios)
+        session: Sesión SQLAlchemy (opcional, para uso en threads)
 
     Returns:
         dict: Estadísticas de la evaluación
     """
+    db_session = _get_session(session)
+
     # Construir query
-    query = Cliente.query.filter_by(activo=True)
+    query = db_session.query(Cliente).filter_by(activo=True)
     if usuario_id:
         query = query.filter_by(usuario_id=usuario_id)
 
@@ -53,7 +78,7 @@ def evaluar_clientes_actuales(usuario_id=None):
             if not era_actual:
                 stats['recuperados'] += 1
                 # Resolver alertas de reactivación pendientes
-                _resolver_alertas_reactivacion(cliente)
+                _resolver_alertas_reactivacion(cliente, db_session)
         else:
             stats['no_actuales'] += 1
 
@@ -65,24 +90,32 @@ def evaluar_clientes_actuales(usuario_id=None):
             if era_actual:
                 stats['nuevos_no_actuales'] += 1
                 # Crear alerta de reactivación
-                if _crear_alerta_reactivacion(cliente):
+                if _crear_alerta_reactivacion(cliente, db_session):
                     stats['alertas_creadas'] += 1
 
-    db.session.commit()
+    if session is None:
+        db_session.commit()
 
     return stats
 
 
-def _crear_alerta_reactivacion(cliente):
+def _crear_alerta_reactivacion(cliente, db_session=None):
     """
     Crea una alerta de reactivación para un cliente.
     Solo crea si no existe una alerta pendiente.
 
+    Args:
+        cliente: Objeto Cliente
+        db_session: Sesión SQLAlchemy (opcional)
+
     Returns:
         bool: True si se creó la alerta
     """
+    if db_session is None:
+        db_session = db.session
+
     # Verificar si ya existe una alerta pendiente
-    alerta_existente = AlertaVencimiento.query.filter_by(
+    alerta_existente = db_session.query(AlertaVencimiento).filter_by(
         usuario_id=cliente.usuario_id,
         tipo='reactivacion_cliente',
         estado='pendiente'
@@ -111,15 +144,22 @@ def _crear_alerta_reactivacion(cliente):
         estado='pendiente'
     )
 
-    db.session.add(alerta)
+    db_session.add(alerta)
     return True
 
 
-def _resolver_alertas_reactivacion(cliente):
+def _resolver_alertas_reactivacion(cliente, db_session=None):
     """
     Resuelve alertas de reactivación pendientes para un cliente recuperado.
+
+    Args:
+        cliente: Objeto Cliente
+        db_session: Sesión SQLAlchemy (opcional)
     """
-    alertas = AlertaVencimiento.query.filter_by(
+    if db_session is None:
+        db_session = db.session
+
+    alertas = db_session.query(AlertaVencimiento).filter_by(
         usuario_id=cliente.usuario_id,
         tipo='reactivacion_cliente',
         estado='pendiente'
@@ -132,63 +172,72 @@ def _resolver_alertas_reactivacion(cliente):
         alerta.fecha_notificacion = datetime.utcnow()
 
 
-def obtener_clientes_a_reactivar(usuario_id):
+def obtener_clientes_a_reactivar(usuario_id, session=None):
     """
     Obtiene lista de clientes que necesitan reactivación.
 
     Args:
         usuario_id: ID del usuario
+        session: Sesión SQLAlchemy (opcional, para uso en threads)
 
     Returns:
         list: Lista de clientes con es_cliente_actual=False
     """
-    return Cliente.query.filter_by(
+    db_session = _get_session(session)
+
+    return db_session.query(Cliente).filter_by(
         usuario_id=usuario_id,
         activo=True,
         es_cliente_actual=False
     ).order_by(Cliente.fecha_evaluacion_actual.desc()).all()
 
 
-def obtener_estadisticas_reactivacion(usuario_id):
+def obtener_estadisticas_reactivacion(usuario_id, session=None):
     """
     Obtiene estadísticas de clientes para reactivación.
+
+    Args:
+        usuario_id: ID del usuario
+        session: Sesión SQLAlchemy (opcional, para uso en threads)
 
     Returns:
         dict: Estadísticas
     """
-    total_clientes = Cliente.query.filter_by(
+    db_session = _get_session(session)
+
+    total_clientes = db_session.query(Cliente).filter_by(
         usuario_id=usuario_id,
         activo=True
     ).count()
 
-    clientes_actuales = Cliente.query.filter_by(
+    clientes_actuales = db_session.query(Cliente).filter_by(
         usuario_id=usuario_id,
         activo=True,
         es_cliente_actual=True
     ).count()
 
-    clientes_no_actuales = Cliente.query.filter_by(
+    clientes_no_actuales = db_session.query(Cliente).filter_by(
         usuario_id=usuario_id,
         activo=True,
         es_cliente_actual=False
     ).count()
 
     # Contar por motivo
-    sin_comunicacion = Cliente.query.filter_by(
+    sin_comunicacion = db_session.query(Cliente).filter_by(
         usuario_id=usuario_id,
         activo=True,
         es_cliente_actual=False,
         motivo_no_actual='sin_comunicacion'
     ).count()
 
-    sin_poliza = Cliente.query.filter_by(
+    sin_poliza = db_session.query(Cliente).filter_by(
         usuario_id=usuario_id,
         activo=True,
         es_cliente_actual=False,
         motivo_no_actual='sin_poliza_reciente'
     ).count()
 
-    ambos = Cliente.query.filter_by(
+    ambos = db_session.query(Cliente).filter_by(
         usuario_id=usuario_id,
         activo=True,
         es_cliente_actual=False,
@@ -208,20 +257,27 @@ def obtener_estadisticas_reactivacion(usuario_id):
     }
 
 
-def generar_tareas_reactivacion(usuario_id):
+def generar_tareas_reactivacion(usuario_id, session=None):
     """
     Genera alertas de reactivación para clientes no actuales
     que aún no tienen tarea pendiente.
 
+    Args:
+        usuario_id: ID del usuario
+        session: Sesión SQLAlchemy (opcional, para uso en threads)
+
     Returns:
         int: Número de alertas creadas
     """
-    clientes = obtener_clientes_a_reactivar(usuario_id)
+    db_session = _get_session(session)
+    clientes = obtener_clientes_a_reactivar(usuario_id, session=db_session)
     alertas_creadas = 0
 
     for cliente in clientes:
-        if _crear_alerta_reactivacion(cliente):
+        if _crear_alerta_reactivacion(cliente, db_session):
             alertas_creadas += 1
 
-    db.session.commit()
+    if session is None:
+        db_session.commit()
+
     return alertas_creadas

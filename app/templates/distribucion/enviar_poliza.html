@@ -24,10 +24,11 @@
                     <span class="envio-label">&#128241; WhatsApp:</span>
                     <span class="envio-value">{{ cliente.telefono_whatsapp }}</span>
                 </div>
-                {% if poliza.compania %}
+                {% set nombre_cia = poliza.obtener_nombre_compania() %}
+                {% if nombre_cia %}
                 <div class="envio-row">
                     <span class="envio-label">&#127970; Compañía:</span>
-                    <span class="envio-value">{{ poliza.compania.nombre }}</span>
+                    <span class="envio-value">{{ nombre_cia }}</span>
                 </div>
                 {% endif %}
                 {% if poliza.tipo_seguro %}

@@ -63,8 +63,9 @@
                     <td>
                         {% if envio.poliza %}
                         {{ envio.poliza.tipo_seguro or 'Póliza' }}
-                        {% if envio.poliza.compania %}
-                        <br><small class="text-muted">{{ envio.poliza.compania.nombre }}</small>
+                        {% set nombre_cia_envio = envio.poliza.obtener_nombre_compania() %}
+                        {% if nombre_cia_envio %}
+                        <br><small class="text-muted">{{ nombre_cia_envio }}</small>
                         {% endif %}
                         {% else %}
                         <span class="text-muted">Mensaje directo</span>

@@ -28,20 +28,25 @@
             </a>
             {% endif %}
 
-            <!-- Menu Extractor -->
+            <!-- Menu Extractor (servidor externo - usa misma IP que el portal) -->
             <div class="nav-dropdown">
-                <a href="{{ url_for('extractor.index') }}" class="nav-link {% if 'extractor' in request.endpoint %}active{% endif %}">
+                <a href="#" onclick="abrirExtractor('/')" class="nav-link">
                     Extractor <span class="dropdown-arrow">&#9662;</span>
                 </a>
                 <div class="nav-dropdown-menu">
-                    <a href="{{ url_for('extractor.index') }}">Escanear Correos</a>
-                    <a href="{{ url_for('extractor.historial') }}">Historial</a>
-                    <a href="{{ url_for('extractor.memoria_escaneo') }}">Memoria</a>
+                    <a href="#" onclick="abrirExtractor('/')">Panel de Control</a>
+                    <a href="#" onclick="abrirExtractor('/revision')">Revisión de Pólizas</a>
+                    <a href="#" onclick="abrirExtractor('/paso-a-paso')">Paso a Paso</a>
+                    <a href="{{ url_for('main.archivos') }}">Archivos Descargados</a>
                 </div>
             </div>
 
             <a href="{{ url_for('main.archivos') }}" class="nav-link {% if request.endpoint == 'main.archivos' %}active{% endif %}">
                 Archivos
+            </a>
+
+            <a href="{{ url_for('distribucion.polizas') }}" class="nav-link {% if request.endpoint == 'distribucion.polizas' %}active{% endif %}">
+                Polizas
             </a>
 
             <!-- Menu Distribucion -->
@@ -51,6 +56,7 @@
                 </a>
                 <div class="nav-dropdown-menu">
                     <a href="{{ url_for('distribucion.crm_dashboard') }}">CRM Dashboard</a>
+                    <a href="{{ url_for('distribucion.polizas') }}">Polizas</a>
                     <a href="{{ url_for('distribucion.clientes') }}">Clientes</a>
                     <a href="{{ url_for('distribucion.clientes_reactivar') }}">Clientes a Reactivar</a>
                     <a href="{{ url_for('distribucion.inmobiliarias') }}">Inmobiliarias</a>
@@ -114,6 +120,17 @@
     </footer>
     {% endif %}
 
+    <script>
+        // URL dinámica del Extractor Server (usa misma IP que el portal, puerto 5252)
+        function getExtractorUrl(path = '/') {
+            const host = window.location.hostname;
+            return `http://${host}:5252${path}`;
+        }
+
+        function abrirExtractor(path = '/') {
+            window.open(getExtractorUrl(path), '_blank');
+        }
+    </script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
     {% block extra_js %}{% endblock %}
 </body>

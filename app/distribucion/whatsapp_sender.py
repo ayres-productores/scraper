@@ -12,6 +12,9 @@ from threading import Thread, Lock
 from time import sleep
 from flask import current_app
 
+# Importar gestión de sesiones thread-safe
+from app.utils.db_session import thread_session
+
 logger = logging.getLogger(__name__)
 
 
@@ -323,26 +326,23 @@ class WhatsAppQueueProcessor:
             self.thread.join(timeout=5)
 
     def _procesar_cola(self):
-        """Bucle principal de procesamiento de cola."""
+        """Bucle principal de procesamiento de cola.
+
+        IMPORTANTE: Usa sesiones CORTAS para no bloquear la BD durante
+        operaciones lentas (HTTP calls a WhatsApp, sleeps).
+        """
         while self.running:
             try:
-                with self.app.app_context():
-                    self._procesar_pendientes()
+                # Procesar envíos a clientes (sesiones cortas internas)
+                self._procesar_envios_clientes()
+
+                # Procesar notificaciones a inmobiliarias (sesiones cortas internas)
+                self._procesar_notificaciones_inmobiliarias()
+
             except Exception as e:
                 logger.error(f"[WhatsApp] Error en procesador: {e}")
 
             sleep(self.intervalo_segundos)
-
-    def _procesar_pendientes(self):
-        """Procesa los envíos pendientes."""
-        from app import db
-        from app.models import EnvioWhatsApp
-
-        # Procesar envíos a clientes
-        self._procesar_envios_clientes()
-
-        # Procesar notificaciones a inmobiliarias
-        self._procesar_notificaciones_inmobiliarias()
 
     def _enviar_via_servicio_web(self, usuario_id, telefono, mensaje, ruta_pdf=None, nombre_pdf=None):
         """
@@ -409,183 +409,296 @@ class WhatsAppQueueProcessor:
         return session is not None
 
     def _procesar_envios_clientes(self):
-        """Procesa los envíos pendientes a clientes."""
-        from app import db
+        """Procesa los envíos pendientes a clientes.
+
+        IMPORTANTE: Usa sesiones CORTAS para no bloquear la BD.
+        1. Lee pendientes (sesión corta)
+        2. Cierra sesión
+        3. Hace HTTP calls (sin sesión)
+        4. Actualiza estado (sesión corta por cada update)
+        """
         from app.models import EnvioWhatsApp, WhatsAppSession
 
-        # Obtener envíos pendientes
-        pendientes = EnvioWhatsApp.query.filter_by(estado='pendiente').filter(
-            EnvioWhatsApp.intentos < self.max_reintentos
-        ).order_by(EnvioWhatsApp.id).limit(10).all()
+        # PASO 1: Leer pendientes con sesión corta
+        pendientes_data = []
+        try:
+            with thread_session(self.app) as session:
+                pendientes = session.query(EnvioWhatsApp).filter_by(estado='pendiente').filter(
+                    EnvioWhatsApp.intentos < self.max_reintentos
+                ).order_by(EnvioWhatsApp.id).limit(10).all()
 
-        if not pendientes:
+                # Extraer datos ANTES de cerrar sesión
+                for envio in pendientes:
+                    try:
+                        data = {
+                            'envio_id': envio.id,
+                            'cliente_id': envio.cliente_id,
+                            'cliente_nombre': envio.cliente.nombre_completo if envio.cliente else 'Desconocido',
+                            'telefono': envio.cliente.telefono_formateado if envio.cliente else None,
+                            'usuario_id': envio.cliente.usuario_id if envio.cliente else None,
+                            'mensaje': envio.mensaje_enviado,
+                            'intentos': envio.intentos,
+                            'ruta_pdf': None,
+                            'nombre_pdf': None,
+                        }
+
+                        if envio.poliza:
+                            if envio.poliza.ruta_pdf_backup and os.path.exists(envio.poliza.ruta_pdf_backup):
+                                data['ruta_pdf'] = envio.poliza.ruta_pdf_backup
+                                data['nombre_pdf'] = f"Poliza_{envio.poliza.numero_poliza or envio.poliza.id}.pdf"
+                            elif envio.archivo and envio.archivo.ruta_archivo:
+                                if os.path.exists(envio.archivo.ruta_archivo):
+                                    data['ruta_pdf'] = envio.archivo.ruta_archivo
+                                    data['nombre_pdf'] = envio.archivo.nombre_archivo or f"Poliza_{envio.poliza.id}.pdf"
+
+                        pendientes_data.append(data)
+                    except Exception as e:
+                        logger.warning(f"[WhatsApp] Error extrayendo datos envío {envio.id}: {e}")
+
+        except Exception as e:
+            logger.error(f"[WhatsApp] Error leyendo pendientes: {e}")
             return
 
+        if not pendientes_data:
+            return
+
+        # PASO 2: Procesar cada envío (HTTP calls FUERA de sesión)
         sender = WhatsAppSender(self.app.config)
 
-        for envio in pendientes:
+        for data in pendientes_data:
             if not self.running:
                 break
 
+            if not data['telefono']:
+                continue
+
             try:
-                cliente = envio.cliente
-                telefono = cliente.telefono_formateado
-                usuario_id = cliente.usuario_id
-
-                # Obtener datos del PDF si existe
-                ruta_pdf = None
-                nombre_pdf = None
-
-                if envio.poliza:
-                    poliza = envio.poliza
-                    if poliza.ruta_pdf_backup and os.path.exists(poliza.ruta_pdf_backup):
-                        ruta_pdf = poliza.ruta_pdf_backup
-                        nombre_pdf = f"Poliza_{poliza.numero_poliza or poliza.id}.pdf"
-                    elif envio.archivo and envio.archivo.ruta_archivo:
-                        if os.path.exists(envio.archivo.ruta_archivo):
-                            ruta_pdf = envio.archivo.ruta_archivo
-                            nombre_pdf = envio.archivo.nombre_archivo or f"Poliza_{poliza.id}.pdf"
+                exito = False
+                resultado = None
+                metodo = 'manual'
 
                 # PRIORIDAD 1: Sesión personal de WhatsApp Web
-                if self._verificar_sesion_web_activa(usuario_id):
-                    logger.info(f"[WhatsApp] Usando sesión personal del usuario {usuario_id}")
+                if self._verificar_sesion_web_activa(data['usuario_id']):
+                    logger.info(f"[WhatsApp] Usando sesión personal del usuario {data['usuario_id']}")
+                    metodo = 'web'
 
                     exito, resultado = self._enviar_via_servicio_web(
-                        usuario_id=usuario_id,
-                        telefono=telefono,
-                        mensaje=envio.mensaje_enviado,
-                        ruta_pdf=ruta_pdf,
-                        nombre_pdf=nombre_pdf
+                        usuario_id=data['usuario_id'],
+                        telefono=data['telefono'],
+                        mensaje=data['mensaje'],
+                        ruta_pdf=data['ruta_pdf'],
+                        nombre_pdf=data['nombre_pdf']
                     )
 
-                    if exito:
-                        envio.estado = 'enviado'
-                        envio.fecha_envio = datetime.utcnow()
-                        envio.estado_mensaje = 'sent'
-                        if resultado and resultado != 'OK':
-                            envio.wamid = resultado
-                        cliente.ultimo_envio = datetime.utcnow()
-
-                        # Actualizar último uso de la sesión
-                        wa_session = WhatsAppSession.query.filter_by(usuario_id=usuario_id).first()
-                        if wa_session:
-                            wa_session.actualizar_uso()
-
-                        logger.info(f"[WhatsApp-Web] Enviado a {cliente.nombre_completo}: {resultado}")
-                    else:
-                        envio.intentos += 1
-                        envio.mensaje_error = f"WhatsApp Web: {resultado}"
-                        if envio.intentos >= self.max_reintentos:
-                            envio.estado = 'error'
-                        logger.warning(f"[WhatsApp-Web] Error enviando a {cliente.nombre_completo}: {resultado}")
-
-                # PRIORIDAD 2: WhatsApp Business API (central)
+                # PRIORIDAD 2: WhatsApp Business API
                 elif sender.modo == 'api' and sender.api_key:
-                    if ruta_pdf:
-                        logger.info(f"[WhatsApp-API] Enviando póliza con PDF a {cliente.nombre_completo}")
+                    metodo = 'api'
+                    if data['ruta_pdf']:
+                        logger.info(f"[WhatsApp-API] Enviando póliza con PDF a {data['cliente_nombre']}")
                         exito, resultado = sender.enviar_poliza_completa(
-                            telefono=telefono,
-                            ruta_pdf=ruta_pdf,
-                            mensaje=envio.mensaje_enviado,
-                            nombre_archivo=nombre_pdf
+                            telefono=data['telefono'],
+                            ruta_pdf=data['ruta_pdf'],
+                            mensaje=data['mensaje'],
+                            nombre_archivo=data['nombre_pdf']
                         )
                     else:
-                        logger.info(f"[WhatsApp-API] Enviando solo texto a {cliente.nombre_completo}")
-                        exito, resultado = sender.enviar_mensaje_api(telefono, envio.mensaje_enviado)
+                        logger.info(f"[WhatsApp-API] Enviando solo texto a {data['cliente_nombre']}")
+                        exito, resultado = sender.enviar_mensaje_api(data['telefono'], data['mensaje'])
 
-                    if exito:
-                        envio.estado = 'enviado'
-                        envio.fecha_envio = datetime.utcnow()
-                        envio.estado_mensaje = 'sent'
-                        if resultado and resultado != 'OK':
-                            envio.wamid = resultado
-                        cliente.ultimo_envio = datetime.utcnow()
-                        logger.info(f"[WhatsApp-API] Enviado a {cliente.nombre_completo}: wamid={resultado}")
-                    else:
-                        envio.intentos += 1
-                        envio.mensaje_error = resultado
-                        if envio.intentos >= self.max_reintentos:
-                            envio.estado = 'error'
-                        logger.warning(f"[WhatsApp-API] Error enviando a {cliente.nombre_completo}: {resultado}")
-
-                # PRIORIDAD 3: Modo manual (fallback)
+                # PRIORIDAD 3: Modo manual
                 else:
-                    envio.estado = 'enviado'
-                    envio.fecha_envio = datetime.utcnow()
-                    cliente.ultimo_envio = datetime.utcnow()
-                    logger.info(f"[WhatsApp-Manual] Marcado para envío manual: {cliente.nombre_completo}")
+                    exito = True
+                    resultado = 'manual'
 
-                db.session.commit()
-
-                # Rate limiting: esperar entre envíos
-                sleep(1)
-
-            except Exception as e:
-                envio.intentos += 1
-                envio.mensaje_error = str(e)
-                if envio.intentos >= self.max_reintentos:
-                    envio.estado = 'error'
-                db.session.commit()
-                logger.error(f"[WhatsApp] Excepción: {e}")
-
-    def _procesar_notificaciones_inmobiliarias(self):
-        """Procesa las notificaciones pendientes a inmobiliarias."""
-        from app import db
-        from app.models import NotificacionInmobiliaria
-
-        # Obtener notificaciones pendientes
-        pendientes = NotificacionInmobiliaria.query.filter_by(estado='pendiente').filter(
-            NotificacionInmobiliaria.intentos < self.max_reintentos
-        ).order_by(NotificacionInmobiliaria.id).limit(10).all()
-
-        if not pendientes:
-            return
-
-        sender = WhatsAppSender(self.app.config)
-
-        for notif in pendientes:
-            if not self.running:
-                break
-
-            try:
-                inmobiliaria = notif.inmobiliaria
-                if not inmobiliaria or not inmobiliaria.telefono_whatsapp:
-                    notif.estado = 'error'
-                    notif.mensaje_error = 'Inmobiliaria sin telefono WhatsApp'
-                    db.session.commit()
-                    continue
-
-                telefono = inmobiliaria.telefono_formateado
-
-                # Enviar mensaje
-                if sender.modo == 'api' and sender.api_key:
-                    exito, resultado = sender.enviar_mensaje_api(telefono, notif.mensaje)
-
-                    if exito:
-                        notif.marcar_enviado()
-                        logger.info(f"[WhatsApp-Inmob] Enviado a {inmobiliaria.nombre}: {notif.tipo}")
-                    else:
-                        notif.intentos += 1
-                        notif.mensaje_error = resultado
-                        if notif.intentos >= self.max_reintentos:
-                            notif.estado = 'error'
-                        logger.warning(f"[WhatsApp-Inmob] Error enviando a {inmobiliaria.nombre}: {resultado}")
-                else:
-                    # Modo manual - marcar como enviado
-                    notif.marcar_enviado()
-
-                db.session.commit()
+                # PASO 3: Actualizar estado con sesión corta
+                self._actualizar_envio_cliente(
+                    envio_id=data['envio_id'],
+                    cliente_id=data['cliente_id'],
+                    usuario_id=data['usuario_id'],
+                    exito=exito,
+                    resultado=resultado,
+                    metodo=metodo,
+                    intentos=data['intentos'],
+                    cliente_nombre=data['cliente_nombre']
+                )
 
                 # Rate limiting
                 sleep(1)
 
             except Exception as e:
-                notif.intentos += 1
-                notif.mensaje_error = str(e)
-                if notif.intentos >= self.max_reintentos:
-                    notif.estado = 'error'
-                db.session.commit()
-                logger.error(f"[WhatsApp-Inmob] Excepción: {e}")
+                logger.error(f"[WhatsApp] Excepción procesando envío {data['envio_id']}: {e}")
+                self._marcar_error_envio(data['envio_id'], str(e), data['intentos'])
+
+    def _actualizar_envio_cliente(self, envio_id, cliente_id, usuario_id, exito, resultado, metodo, intentos, cliente_nombre):
+        """Actualiza el estado de un envío con sesión corta."""
+        from app.models import EnvioWhatsApp, Cliente, WhatsAppSession
+
+        try:
+            with thread_session(self.app) as session:
+                envio = session.query(EnvioWhatsApp).get(envio_id)
+                if not envio:
+                    return
+
+                cliente = session.query(Cliente).get(cliente_id) if cliente_id else None
+
+                if exito:
+                    envio.estado = 'enviado'
+                    envio.fecha_envio = datetime.utcnow()
+                    envio.estado_mensaje = 'sent'
+                    if resultado and resultado not in ('OK', 'manual'):
+                        envio.wamid = resultado
+
+                    if cliente:
+                        cliente.ultimo_envio = datetime.utcnow()
+
+                    # Actualizar sesión WhatsApp Web si se usó
+                    if metodo == 'web' and usuario_id:
+                        wa_session = session.query(WhatsAppSession).filter_by(usuario_id=usuario_id).first()
+                        if wa_session:
+                            wa_session.ultimo_uso = datetime.utcnow()
+
+                    logger.info(f"[WhatsApp-{metodo.upper()}] Enviado a {cliente_nombre}: {resultado}")
+                else:
+                    envio.intentos = intentos + 1
+                    envio.mensaje_error = f"{metodo}: {resultado}"
+                    if envio.intentos >= self.max_reintentos:
+                        envio.estado = 'error'
+                    logger.warning(f"[WhatsApp-{metodo.upper()}] Error enviando a {cliente_nombre}: {resultado}")
+
+        except Exception as e:
+            logger.error(f"[WhatsApp] Error actualizando envío {envio_id}: {e}")
+
+    def _marcar_error_envio(self, envio_id, error_msg, intentos):
+        """Marca un envío como error con sesión corta."""
+        from app.models import EnvioWhatsApp
+
+        try:
+            with thread_session(self.app) as session:
+                envio = session.query(EnvioWhatsApp).get(envio_id)
+                if envio:
+                    envio.intentos = intentos + 1
+                    envio.mensaje_error = error_msg
+                    if envio.intentos >= self.max_reintentos:
+                        envio.estado = 'error'
+        except Exception as e:
+            logger.error(f"[WhatsApp] Error marcando error en envío {envio_id}: {e}")
+
+    def _procesar_notificaciones_inmobiliarias(self):
+        """Procesa las notificaciones pendientes a inmobiliarias.
+
+        IMPORTANTE: Usa sesiones CORTAS para no bloquear la BD.
+        """
+        from app.models import NotificacionInmobiliaria
+
+        # PASO 1: Leer pendientes con sesión corta
+        pendientes_data = []
+        try:
+            with thread_session(self.app) as session:
+                pendientes = session.query(NotificacionInmobiliaria).filter_by(estado='pendiente').filter(
+                    NotificacionInmobiliaria.intentos < self.max_reintentos
+                ).order_by(NotificacionInmobiliaria.id).limit(10).all()
+
+                for notif in pendientes:
+                    try:
+                        inmobiliaria = notif.inmobiliaria
+                        data = {
+                            'notif_id': notif.id,
+                            'tipo': notif.tipo,
+                            'mensaje': notif.mensaje,
+                            'intentos': notif.intentos,
+                            'telefono': inmobiliaria.telefono_formateado if inmobiliaria and inmobiliaria.telefono_whatsapp else None,
+                            'inmobiliaria_nombre': inmobiliaria.nombre if inmobiliaria else 'Desconocida',
+                        }
+                        pendientes_data.append(data)
+                    except Exception as e:
+                        logger.warning(f"[WhatsApp-Inmob] Error extrayendo datos notif {notif.id}: {e}")
+
+        except Exception as e:
+            logger.error(f"[WhatsApp-Inmob] Error leyendo pendientes: {e}")
+            return
+
+        if not pendientes_data:
+            return
+
+        # PASO 2: Procesar cada notificación
+        sender = WhatsAppSender(self.app.config)
+
+        for data in pendientes_data:
+            if not self.running:
+                break
+
+            # Si no tiene teléfono, marcar error
+            if not data['telefono']:
+                self._marcar_error_notif(data['notif_id'], 'Inmobiliaria sin telefono WhatsApp', data['intentos'])
+                continue
+
+            try:
+                exito = False
+                resultado = None
+
+                # Enviar mensaje
+                if sender.modo == 'api' and sender.api_key:
+                    exito, resultado = sender.enviar_mensaje_api(data['telefono'], data['mensaje'])
+                else:
+                    # Modo manual
+                    exito = True
+                    resultado = 'manual'
+
+                # PASO 3: Actualizar con sesión corta
+                self._actualizar_notificacion(
+                    notif_id=data['notif_id'],
+                    exito=exito,
+                    resultado=resultado,
+                    intentos=data['intentos'],
+                    inmobiliaria_nombre=data['inmobiliaria_nombre'],
+                    tipo=data['tipo']
+                )
+
+                # Rate limiting
+                sleep(1)
+
+            except Exception as e:
+                logger.error(f"[WhatsApp-Inmob] Excepción procesando notif {data['notif_id']}: {e}")
+                self._marcar_error_notif(data['notif_id'], str(e), data['intentos'])
+
+    def _actualizar_notificacion(self, notif_id, exito, resultado, intentos, inmobiliaria_nombre, tipo):
+        """Actualiza el estado de una notificación con sesión corta."""
+        from app.models import NotificacionInmobiliaria
+
+        try:
+            with thread_session(self.app) as session:
+                notif = session.query(NotificacionInmobiliaria).get(notif_id)
+                if not notif:
+                    return
+
+                if exito:
+                    notif.estado = 'enviado'
+                    notif.fecha_envio = datetime.utcnow()
+                    logger.info(f"[WhatsApp-Inmob] Enviado a {inmobiliaria_nombre}: {tipo}")
+                else:
+                    notif.intentos = intentos + 1
+                    notif.mensaje_error = resultado
+                    if notif.intentos >= self.max_reintentos:
+                        notif.estado = 'error'
+                    logger.warning(f"[WhatsApp-Inmob] Error enviando a {inmobiliaria_nombre}: {resultado}")
+
+        except Exception as e:
+            logger.error(f"[WhatsApp-Inmob] Error actualizando notif {notif_id}: {e}")
+
+    def _marcar_error_notif(self, notif_id, error_msg, intentos):
+        """Marca una notificación como error con sesión corta."""
+        from app.models import NotificacionInmobiliaria
+
+        try:
+            with thread_session(self.app) as session:
+                notif = session.query(NotificacionInmobiliaria).get(notif_id)
+                if notif:
+                    notif.intentos = intentos + 1
+                    notif.mensaje_error = error_msg
+                    if notif.intentos >= self.max_reintentos:
+                        notif.estado = 'error'
+        except Exception as e:
+            logger.error(f"[WhatsApp-Inmob] Error marcando error en notif {notif_id}: {e}")
 
 
 # Instancia global del procesador

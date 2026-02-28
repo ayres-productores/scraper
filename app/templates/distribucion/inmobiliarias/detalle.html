@@ -125,8 +125,9 @@
                         </a>
                     </td>
                     <td>
-                        {% if poliza.compania %}
-                        <span class="badge badge-primary">{{ poliza.compania.nombre }}</span>
+                        {% set nombre_cia = poliza.obtener_nombre_compania() %}
+                        {% if nombre_cia %}
+                        <span class="badge badge-primary">{{ nombre_cia }}</span>
                         {% else %}
                         <span class="text-muted">-</span>
                         {% endif %}

@@ -7,7 +7,7 @@
     <div>
         <a href="{{ url_for('distribucion.cliente_detalle', cliente_id=poliza.cliente.id) }}" class="btn btn-sm btn-outline">&larr; Volver al cliente</a>
         <h1>Poliza: {{ poliza.numero_poliza or 'Sin numero' }}</h1>
-        <p class="text-muted">{{ poliza.cliente.nombre_completo }} | {{ poliza.compania.nombre if poliza.compania else 'Sin compania' }}</p>
+        <p class="text-muted">{{ poliza.cliente.nombre_completo }} | {{ poliza.obtener_nombre_compania() or 'Sin compañía' }}</p>
     </div>
     <div class="header-actions">
         <span class="badge badge-lg {% if poliza.estado == 'activa' %}badge-success{% elif poliza.estado == 'vencida' %}badge-danger{% elif poliza.estado == 'cancelada' %}badge-dark{% else %}badge-warning{% endif %}">

@@ -77,8 +77,9 @@
                             {% endif %}
                         </td>
                         <td>
-                            {% if poliza.compania %}
-                            <span class="badge badge-compania">{{ poliza.compania.nombre }}</span>
+                            {% set nombre_cia = poliza.obtener_nombre_compania() %}
+                            {% if nombre_cia %}
+                            <span class="badge badge-compania">{{ nombre_cia }}</span>
                             {% else %}
                             <span class="text-muted">-</span>
                             {% endif %}
@@ -114,7 +115,7 @@
                                class="btn btn-xs btn-primary" title="Asignar a cliente">
                                 &#128100;
                             </a>
-                            <a href="{{ url_for('extractor.descargar_pdf', archivo_id=poliza.id) }}"
+                            <a href="{{ url_for('main.descargar_archivo', archivo_id=poliza.id) }}"
                                class="btn btn-xs btn-outline" title="Descargar PDF" target="_blank">
                                 &#128196;
                             </a>

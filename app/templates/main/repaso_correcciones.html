@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+
+{% block title %}Repaso de Correcciones - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Repaso de Correcciones</h1>
+    <div class="header-actions">
+        <a href="{{ url_for('main.archivos') }}" class="btn btn-outline">
+            &#8592; Volver a Archivos
+        </a>
+        {% if archivos %}
+        <button type="button" class="btn btn-primary" onclick="reprocesarTodos()">
+            &#128260; Reprocesar Todos ({{ total_corregidos }})
+        </button>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card info-card">
+    <div class="card-body">
+        <p>
+            <strong>&#9432; Informacion:</strong>
+            Esta pagina muestra los archivos cuya compania fue corregida manualmente.
+            Al reprocesar, se actualizaran las polizas asociadas con la nueva compania.
+        </p>
+    </div>
+</div>
+
+{% if archivos %}
+<div class="card">
+    <div class="card-header">
+        <h2>Archivos con Correcciones ({{ total_corregidos }})</h2>
+    </div>
+    <div class="card-body">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Archivo</th>
+                    <th>Compania Original</th>
+                    <th>Compania Corregida</th>
+                    <th>Fecha Correccion</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for archivo in archivos %}
+                <tr id="fila-{{ archivo.id }}">
+                    <td>
+                        <a href="#" class="pdf-link" onclick="abrirPdfViewer('{{ url_for('main.ver_archivo', archivo_id=archivo.id) }}', '{{ archivo.nombre_archivo|e }}', {{ archivo.id }}); return false;">
+                            <span class="file-icon">&#128196;</span>
+                            {{ archivo.nombre_archivo[:40] }}{% if archivo.nombre_archivo|length > 40 %}...{% endif %}
+                        </a>
+                    </td>
+                    <td>
+                        {% if archivo.compania_original %}
+                        <span class="badge badge-secondary">{{ archivo.compania_original.nombre }}</span>
+                        {% else %}
+                        <span class="text-muted">Sin compania</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if archivo.compania %}
+                        <span class="badge badge-primary">{{ archivo.compania.nombre }}</span>
+                        {% else %}
+                        <span class="text-muted">Sin compania</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {{ archivo.fecha_correccion.strftime('%d/%m/%Y %H:%M') if archivo.fecha_correccion else '-' }}
+                    </td>
+                    <td class="actions-cell">
+                        <button type="button" class="btn btn-sm btn-success"
+                                onclick="marcarReprocesado({{ archivo.id }})"
+                                title="Marcar como procesado">
+                            &#10004;
+                        </button>
+                        <a href="{{ url_for('main.ver_archivo', archivo_id=archivo.id) }}"
+                           class="btn btn-sm btn-outline"
+                           title="Ver PDF"
+                           target="_blank">
+                            &#128065;
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <div class="card-body">
+        <div class="empty-state">
+            <span class="empty-icon">&#10004;</span>
+            <h3>No hay correcciones pendientes</h3>
+            <p>Todos los archivos con correcciones han sido reprocesados.</p>
+            <a href="{{ url_for('main.archivos') }}" class="btn btn-primary">Ir a Archivos</a>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.info-card {
+    background: #e8f4fd;
+    border-left: 4px solid var(--primary);
+    margin-bottom: 1.5rem;
+}
+
+.info-card p {
+    margin: 0;
+    color: var(--dark);
+}
+
+.badge-secondary {
+    background: var(--gray);
+    color: white;
+}
+
+.badge-primary {
+    background: var(--primary);
+    color: white;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 3rem;
+}
+
+.empty-icon {
+    font-size: 4rem;
+    display: block;
+    margin-bottom: 1rem;
+    color: var(--success);
+}
+
+.pdf-link {
+    color: var(--primary);
+    text-decoration: none;
+}
+
+.pdf-link:hover {
+    text-decoration: underline;
+}
+
+.file-icon {
+    margin-right: 0.5rem;
+}
+
+.actions-cell {
+    white-space: nowrap;
+}
+
+.actions-cell .btn {
+    margin-right: 0.25rem;
+}
+
+.btn-success {
+    background: var(--success);
+    color: white;
+    border: none;
+}
+
+.btn-success:hover {
+    background: #059669;
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+async function reprocesarTodos() {
+    if (!confirm('Se reprocesaran todos los archivos con correcciones. Continuar?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/archivos/reprocesar-corregidos', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            }
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            let mensaje = data.message;
+            if (data.errores && data.errores.length > 0) {
+                mensaje += '\n\nErrores:\n' + data.errores.join('\n');
+            }
+            alert(mensaje);
+            window.location.reload();
+        } else {
+            alert(data.message || 'Error al reprocesar');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error de conexion');
+    }
+}
+
+async function marcarReprocesado(archivoId) {
+    try {
+        const response = await fetch(`/api/archivo/${archivoId}/marcar-reprocesado`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            }
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            // Eliminar la fila de la tabla
+            const fila = document.getElementById(`fila-${archivoId}`);
+            if (fila) {
+                fila.style.transition = 'opacity 0.3s';
+                fila.style.opacity = '0';
+                setTimeout(() => {
+                    fila.remove();
+                    // Si no quedan filas, recargar para mostrar estado vacio
+                    const tbody = document.querySelector('tbody');
+                    if (tbody && tbody.children.length === 0) {
+                        window.location.reload();
+                    }
+                }, 300);
+            }
+        } else {
+            alert(data.message || 'Error al marcar como procesado');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error de conexion');
+    }
+}
+</script>
+{% endblock %}

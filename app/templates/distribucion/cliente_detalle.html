@@ -50,6 +50,7 @@
                     </div>
                 </div>
                 {% endif %}
+                {% if cliente.fecha_registro %}
                 <div class="info-item">
                     <span class="info-icon">&#128197;</span>
                     <div>
@@ -57,6 +58,7 @@
                         <span>{{ cliente.fecha_registro.strftime('%d/%m/%Y') }}</span>
                     </div>
                 </div>
+                {% endif %}
             </div>
 
             {% if cliente.notas %}
@@ -116,8 +118,9 @@
                 {% for poliza in polizas %}
                 <tr>
                     <td>
-                        {% if poliza.compania %}
-                        <span class="badge badge-primary">{{ poliza.compania.nombre }}</span>
+                        {% set nombre_cia = poliza.obtener_nombre_compania() %}
+                        {% if nombre_cia %}
+                        <span class="badge badge-primary">{{ nombre_cia }}</span>
                         {% else %}
                         <span class="text-muted">-</span>
                         {% endif %}

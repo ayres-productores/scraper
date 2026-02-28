@@ -1,137 +1,129 @@
 #!/usr/bin/env python
 """
-Script de inicio del Portal de Seguros
-Con diagnóstico de inicialización para detectar ventanas fantasma
+Portal de Seguros - Servidor Principal
+Accesible desde red local (LAN) y localhost.
 """
 
 import os
 import sys
-import traceback
-from datetime import datetime
+import socket
+import logging
 
-# Archivo de log para diagnóstico
-LOG_FILE = os.path.join(os.path.dirname(__file__), 'inicio_diagnostico.log')
+def get_base_path():
+    """Obtiene la ruta base, funciona tanto en desarrollo como en ejecutable."""
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    else:
+        return os.path.dirname(os.path.abspath(__file__))
 
-def log(mensaje):
-    """Registra mensaje en consola y archivo."""
-    timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
-    linea = f"[{timestamp}] {mensaje}"
-    print(linea)
+
+def get_local_ip():
+    """Obtiene la IP local de la maquina en la red."""
     try:
-        with open(LOG_FILE, 'a', encoding='utf-8') as f:
-            f.write(linea + '\n')
-    except:
-        pass
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
+def setup_environment():
+    """Configura el entorno y crea directorios necesarios."""
+    base_path = get_base_path()
+    os.chdir(base_path)
+
+    for folder in ['archivos_usuarios', 'uploads', 'downloads', 'logs']:
+        folder_path = os.path.join(base_path, folder)
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+
+    return base_path
+
+
+def setup_logging(base_path):
+    """Configura el sistema de logging."""
+    log_format = '%(asctime)s [%(levelname)s] %(message)s'
+    logging.basicConfig(
+        level=logging.INFO,
+        format=log_format,
+        handlers=[
+            logging.FileHandler(os.path.join(base_path, 'logs', 'servidor.log'), encoding='utf-8'),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+    return logging.getLogger(__name__)
+
 
 def main():
-    log("=" * 60)
-    log("INICIO DE DIAGNOSTICO - Portal de Seguros")
-    log("=" * 60)
-    log(f"Python: {sys.version}")
-    log(f"Ejecutable: {sys.executable}")
-    log(f"Directorio: {os.getcwd()}")
-    log(f"Archivo: {__file__}")
-    log("-" * 60)
+    """Funcion principal del servidor."""
+    base_path = setup_environment()
+    logger = setup_logging(base_path)
+    local_ip = get_local_ip()
+    port = 5000
 
-    # Paso 1: Importar Flask app
-    log("[PASO 1] Importando aplicación Flask...")
+    banner = f"""
+{'=' * 60}
+       PORTAL DE SEGUROS
+       Extractor y CRM de Polizas
+{'=' * 60}
+
+  Directorio base: {base_path}
+
+  ACCESO AL SISTEMA:
+  {'-' * 40}
+  Desde esta PC:     http://localhost:{port}
+  Desde la red LAN:  http://{local_ip}:{port}
+  {'-' * 40}
+
+  Credenciales por defecto:
+  Usuario:    admin@empresa.com
+  Contrasena: CambiarEnPrimerLogin123!
+
+  IMPORTANTE:
+  - Asegurese de que el firewall permita conexiones al puerto {port}
+  - No cierre esta ventana mientras el servidor este en uso
+
+{'=' * 60}
+  Presione Ctrl+C para detener el servidor
+{'=' * 60}
+"""
+    print(banner)
+    logger.info(f"Iniciando servidor en puerto {port}")
+
+    from app import create_app
+    app = create_app()
+
+    logger.info(f"Blueprints cargados: {list(app.blueprints.keys())}")
+
+    # Intentar usar waitress (servidor de produccion)
     try:
-        from app import create_app
-        log("[PASO 1] OK - Módulo app importado")
-    except Exception as e:
-        log(f"[PASO 1] ERROR al importar app: {e}")
-        traceback.print_exc()
-        return False
-
-    # Paso 2: Crear la aplicación
-    log("[PASO 2] Creando instancia de Flask...")
-    try:
-        app = create_app()
-        log("[PASO 2] OK - Aplicación creada")
-    except Exception as e:
-        log(f"[PASO 2] ERROR al crear app: {e}")
-        traceback.print_exc()
-        return False
-
-    # Paso 3: Crear directorios
-    log("[PASO 3] Verificando directorios...")
-    try:
-        archivos_dir = os.path.join(os.path.dirname(__file__), 'archivos_usuarios')
-        if not os.path.exists(archivos_dir):
-            os.makedirs(archivos_dir)
-            log(f"[PASO 3] Directorio creado: {archivos_dir}")
-        else:
-            log(f"[PASO 3] OK - Directorio existe: {archivos_dir}")
-    except Exception as e:
-        log(f"[PASO 3] ERROR en directorios: {e}")
-        traceback.print_exc()
-        return False
-
-    # Paso 4: Verificar extensiones cargadas
-    log("[PASO 4] Verificando extensiones...")
-    try:
-        log(f"  - Blueprints: {list(app.blueprints.keys())}")
-        log(f"  - Debug: {app.debug}")
-        log("[PASO 4] OK - Extensiones verificadas")
-    except Exception as e:
-        log(f"[PASO 4] ERROR: {e}")
-
-    log("-" * 60)
-    log("DIAGNOSTICO COMPLETADO - Iniciando servidor...")
-    log("-" * 60)
-
-    print()
-    print("=" * 50)
-    print("  PORTAL DE SEGUROS")
-    print("  Extractor de Pólizas")
-    print("=" * 50)
-    print()
-    print("  Servidor iniciando en: http://127.0.0.1:5000")
-    print()
-    print("  Credenciales por defecto:")
-    print("  Usuario: admin@empresa.com")
-    print("  Contraseña: CambiarEnPrimerLogin123!")
-    print()
-    print("=" * 50)
-    print()
-
-    # Paso 5: Iniciar servidor
-    log("[PASO 5] Iniciando servidor Flask...")
-    try:
+        from waitress import serve
+        print("  [*] Iniciando servidor con Waitress (produccion)...")
+        logger.info("Servidor Waitress iniciado")
+        print()
+        serve(app, host='0.0.0.0', port=port, threads=4)
+    except ImportError:
+        print("  [!] Waitress no instalado, usando servidor de desarrollo Flask")
+        print("  [!] Para mejor rendimiento, instale: pip install waitress")
+        logger.info("Servidor Flask (desarrollo) iniciado")
+        print()
         app.run(
-            host='127.0.0.1',
-            port=5000,
-            debug=False,  # Desactivado para evitar ventana fantasma del stat-reloader
-            use_reloader=False
+            host='0.0.0.0',
+            port=port,
+            debug=False,
+            threaded=True
         )
-    except Exception as e:
-        log(f"[PASO 5] ERROR al iniciar servidor: {e}")
-        traceback.print_exc()
-        return False
 
-    return True
 
 if __name__ == '__main__':
-    # Limpiar log anterior
     try:
-        if os.path.exists(LOG_FILE):
-            os.remove(LOG_FILE)
-    except:
-        pass
-
-    try:
-        exito = main()
-        if not exito:
-            print("\n" + "=" * 50)
-            print("  HUBO ERRORES - Revisa arriba")
-            print("=" * 50)
-            input("\nPresiona Enter para cerrar...")
+        main()
     except KeyboardInterrupt:
-        log("\nServidor detenido por el usuario (Ctrl+C)")
+        print("\n\n  [*] Servidor detenido por el usuario")
+        logging.info("Servidor detenido por el usuario")
     except Exception as e:
-        log(f"\nERROR FATAL: {e}")
-        traceback.print_exc()
-        print("\n" + "=" * 50)
-        print("  ERROR FATAL - Revisa el log arriba")
-        print("=" * 50)
-        input("\nPresiona Enter para cerrar...")
+        print(f"\n  [ERROR] {e}")
+        logging.error(f"Error: {e}")
+        input("\n  Presione Enter para cerrar...")
