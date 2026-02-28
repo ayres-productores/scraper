@@ -350,3 +350,62 @@ El portal (puerto 5000) consume los datos extraídos y gestiona:
 - CRM de clientes y pólizas
 - Envíos WhatsApp
 - Alertas y seguimiento
+
+---
+
+## Sesión 2026-02-28 - Cambios Realizados
+
+### 1. Commit: Refactor thread-safety y servidor LAN (315861e)
+- `run.py` refactorizado para acceso LAN unificado + soporte Waitress
+- `servidor_lan.py` eliminado (funcionalidad integrada en run.py)
+- `alertas.py` y `clientes_actuales.py` thread-safe con sesiones inyectables
+- `whatsapp_sender.py` optimizado con sesiones cortas
+- Nuevo endpoint `/api/extractor/reset-total` para limpieza de datos
+- Templates actualizados para apuntar a Extractor Server (puerto 5252)
+- Nueva vista de pólizas en distribución
+- Nuevas utilidades: `structured_logger.py`, `task_progress.py`, `encryption.py`
+- Tests de thread-safety agregados
+
+### 2. CRUD Cuentas Gmail en Extractor Server
+**Archivos modificados en `C:\Users\César\extractor_server\`:**
+
+- `encryption.py` - Agregadas funciones:
+  - `generate_salt()` - Genera salt de 32 bytes
+  - `encrypt_credential(plaintext, salt)` - Encripta con PBKDF2 + Fernet
+
+- `app.py` - Nuevos endpoints:
+  ```
+  GET    /api/cuentas              # Listar activas
+  GET    /api/cuentas/todas        # Listar todas
+  GET    /api/cuentas/<id>         # Detalle
+  POST   /api/cuentas              # Crear (usuario_id, correo_gmail, contrasena_app)
+  PUT    /api/cuentas/<id>         # Editar
+  DELETE /api/cuentas/<id>         # Desactivar (soft delete)
+  POST   /api/cuentas/<id>/reactivar  # Reactivar
+  GET    /cuentas                  # UI de gestión
+  ```
+
+- `templates/cuentas.html` - UI completa con:
+  - Tabla de cuentas (correo, estado, último escaneo)
+  - Modal crear/editar con validación
+  - Botones editar, desactivar, reactivar
+  - Tema oscuro consistente
+
+- `templates/dashboard.html` y `escaneo.html` - Enlace "Cuentas" en nav
+
+### 3. Integración Portal ↔ Extractor
+- `app/templates/base.html` - Menú Extractor ahora incluye "Cuentas Gmail"
+- Acceso: Menú Extractor → Cuentas Gmail (abre `http://{host}:5252/cuentas`)
+
+### Commits Pushed
+- `315861e` - Refactor: mejorar thread-safety y consolidar servidor LAN
+- `f4c75ad` - Feat: agregar enlace a CRUD de cuentas Gmail en menu extractor
+
+### Nota: Extractor Server no tiene Git
+Los cambios en `C:\Users\César\extractor_server\` no están versionados.
+Archivos modificados que deben respaldarse:
+- `encryption.py`
+- `app.py`
+- `templates/cuentas.html`
+- `templates/dashboard.html`
+- `templates/escaneo.html`
