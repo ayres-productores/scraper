@@ -137,8 +137,16 @@ extractor_server/
 /escaneo                   - Escaneo completo
 /debug                     - Debugger step-by-step (3 pasos)
 /revision                  - Revision de polizas
+/cuentas                   - CRUD cuentas Gmail (UI)
 
-/api/cuentas               - Listar cuentas Gmail
+/api/cuentas               - GET: Listar cuentas activas
+/api/cuentas/todas         - GET: Listar todas (activas + inactivas)
+/api/cuentas/<id>          - GET: Detalle cuenta
+/api/cuentas               - POST: Crear cuenta
+/api/cuentas/<id>          - PUT: Editar cuenta
+/api/cuentas/<id>          - DELETE: Desactivar cuenta
+/api/cuentas/<id>/reactivar - POST: Reactivar cuenta
+
 /api/debug/session         - Crear sesion debug
 /api/debug/connect/<id>    - Conectar IMAP
 /api/debug/search/<id>     - Buscar correos
@@ -294,6 +302,7 @@ python run.py
 ## 8. NOTAS DE DESARROLLO
 
 ### Cambios Recientes
+- **CRUD Cuentas Gmail**: Extractor ahora tiene UI completa para gestionar cuentas (/cuentas)
 - **Commit 79f11b6**: Extractor separado a servidor independiente
 - **Debugger**: Reducido de 4 a 3 pasos (conexion IMAP integrada al paso 1)
 
