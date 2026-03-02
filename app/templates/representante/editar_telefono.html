@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}Editar Telefono - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Editar Telefono</h1>
+        <p class="text-muted">{{ cliente.nombre_completo }}</p>
+    </div>
+    <div class="header-actions">
+        {% if poliza_id %}
+        <a href="{{ url_for('representante.poliza_detalle', poliza_id=poliza_id) }}" class="btn btn-outline">&larr; Volver</a>
+        {% else %}
+        <a href="{{ url_for('representante.index') }}" class="btn btn-outline">&larr; Volver</a>
+        {% endif %}
+    </div>
+</div>
+
+<div class="grid-2">
+    <div class="card">
+        <div class="card-header">
+            <h3>Nuevo Telefono</h3>
+        </div>
+        <div class="card-body">
+            <form method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                <div class="form-group">
+                    <label for="telefono">Telefono WhatsApp</label>
+                    <input type="text" name="telefono" id="telefono" class="form-control"
+                           value="{{ cliente.telefono_whatsapp or '' }}"
+                           placeholder="Ej: 11 1234-5678 o 351 123-4567"
+                           autofocus>
+                    <small class="text-muted">
+                        Ingresa el codigo de area + numero. Se normalizara automaticamente al formato argentino.
+                    </small>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Guardar</button>
+                    {% if poliza_id %}
+                    <a href="{{ url_for('representante.poliza_detalle', poliza_id=poliza_id) }}" class="btn btn-outline">Cancelar</a>
+                    {% else %}
+                    <a href="{{ url_for('representante.index') }}" class="btn btn-outline">Cancelar</a>
+                    {% endif %}
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3>Formato</h3>
+        </div>
+        <div class="card-body">
+            <div class="info-section">
+                <h4>Telefono Actual</h4>
+                <p class="telefono-actual">
+                    {% if cliente.telefono_whatsapp %}
+                    <code>{{ cliente.telefono_whatsapp }}</code>
+                    {% else %}
+                    <span class="text-muted">Sin telefono</span>
+                    {% endif %}
+                </p>
+            </div>
+
+            <div class="info-section">
+                <h4>Ejemplos Validos</h4>
+                <ul class="ejemplos-lista">
+                    <li><code>11 1234-5678</code> &rarr; Buenos Aires</li>
+                    <li><code>351 123-4567</code> &rarr; Cordoba</li>
+                    <li><code>221 456-7890</code> &rarr; La Plata</li>
+                    <li><code>011 15 1234-5678</code> &rarr; Tambien valido</li>
+                    <li><code>+54 9 11 1234-5678</code> &rarr; Formato completo</li>
+                </ul>
+            </div>
+
+            <div class="info-section">
+                <h4>Formato Final</h4>
+                <p class="text-muted small">
+                    Todos los numeros se guardan en formato:<br>
+                    <code>549 + codigo area + numero</code><br>
+                    Ejemplo: <code>5491112345678</code>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.grid-2 {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 1.5rem;
+}
+
+.form-group {
+    margin-bottom: 1.5rem;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+.form-control {
+    width: 100%;
+    font-size: 1.1rem;
+    padding: 0.75rem;
+}
+
+.form-actions {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+.info-section {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--light);
+}
+
+.info-section:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+.info-section h4 {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    color: var(--gray);
+    margin-bottom: 0.5rem;
+}
+
+.telefono-actual code {
+    font-size: 1.2rem;
+    background: var(--light);
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius-sm);
+    display: inline-block;
+}
+
+.ejemplos-lista {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.ejemplos-lista li {
+    padding: 0.25rem 0;
+    font-size: 0.9rem;
+}
+
+.ejemplos-lista code {
+    background: var(--light);
+    padding: 0.125rem 0.5rem;
+    border-radius: 3px;
+}
+
+@media (max-width: 768px) {
+    .grid-2 {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+{% endblock %}

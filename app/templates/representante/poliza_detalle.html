@@ -13,13 +13,10 @@
     <div class="header-actions">
         <a href="{{ url_for('representante.index') }}" class="btn btn-outline">&larr; Volver</a>
         {% if poliza.cliente and poliza.cliente.telefono_whatsapp %}
-        <a href="{{ url_for('representante.enviar_whatsapp', poliza_id=poliza.id) }}" class="btn btn-success">
-            &#128172; Enviar WhatsApp
+        <a href="{{ url_for('representante.enviar_documentos', cliente_id=poliza.cliente.id) }}" class="btn btn-success">
+            &#128172; Enviar Documentos
         </a>
         {% endif %}
-        <a href="{{ url_for('representante.registrar_pago', poliza_id=poliza.id) }}" class="btn btn-primary">
-            $ Registrar Pago
-        </a>
     </div>
 </div>
 
@@ -73,6 +70,12 @@
     <div class="card">
         <div class="card-header">
             <h3>Datos del Cliente</h3>
+            {% if poliza.cliente %}
+            <a href="{{ url_for('representante.editar_telefono', cliente_id=poliza.cliente.id, poliza_id=poliza.id) }}"
+               class="btn btn-sm btn-outline" title="Editar telefono">
+                &#9998; Editar Tel
+            </a>
+            {% endif %}
         </div>
         <div class="card-body">
             {% if poliza.cliente %}
@@ -82,8 +85,10 @@
                     <span><strong>{{ poliza.cliente.nombre_completo }}</strong></span>
                 </div>
                 <div class="info-item">
-                    <label>Teléfono</label>
-                    <span>{{ poliza.cliente.telefono_whatsapp or '-' }}</span>
+                    <label>Telefono WhatsApp</label>
+                    <span class="telefono-display">
+                        {{ poliza.cliente.telefono_whatsapp or '-' }}
+                    </span>
                 </div>
                 <div class="info-item">
                     <label>Email</label>
@@ -211,47 +216,6 @@
     </div>
 </div>
 
-<!-- Pagos -->
-<div class="card mt-4">
-    <div class="card-header">
-        <h3>Pagos</h3>
-        <a href="{{ url_for('representante.registrar_pago', poliza_id=poliza.id) }}" class="btn btn-sm btn-primary">+ Registrar Pago</a>
-    </div>
-    <div class="card-body">
-        {% if pagos %}
-        <div class="table-responsive">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Cuota</th>
-                        <th>Monto</th>
-                        <th>Vencimiento</th>
-                        <th>Fecha Pago</th>
-                        <th>Estado</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for pago in pagos %}
-                    <tr>
-                        <td>{{ pago.numero_cuota }}</td>
-                        <td>${{ "{:,.0f}".format(pago.monto) if pago.monto else '-' }}</td>
-                        <td>{{ pago.fecha_vencimiento.strftime('%d/%m/%Y') if pago.fecha_vencimiento else '-' }}</td>
-                        <td>{{ pago.fecha_pago.strftime('%d/%m/%Y') if pago.fecha_pago else '-' }}</td>
-                        <td>
-                            <span class="badge badge-{% if pago.estado == 'pagado' %}success{% elif pago.estado == 'vencido' %}danger{% else %}warning{% endif %}">
-                                {{ pago.estado }}
-                            </span>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <p class="text-muted text-center">Sin pagos registrados</p>
-        {% endif %}
-    </div>
-</div>
 {% endblock %}
 
 {% block extra_css %}

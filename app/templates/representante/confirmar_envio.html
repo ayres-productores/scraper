@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}Confirmar Envio - Portal de Seguros{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Enviar Documentos</h1>
+        <p class="text-muted">{{ cliente.nombre_completo }}</p>
+    </div>
+    <div class="header-actions">
+        <a href="{{ url_for('representante.index') }}" class="btn btn-outline">&larr; Volver</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h3>{{ polizas|length }} documento(s) pendiente(s) de envio</h3>
+    </div>
+    <div class="card-body">
+        <div class="cliente-info">
+            <div class="info-item">
+                <label>Cliente</label>
+                <span><strong>{{ cliente.nombre_completo }}</strong></span>
+            </div>
+            <div class="info-item">
+                <label>Telefono WhatsApp</label>
+                <span>{{ cliente.telefono_whatsapp }}</span>
+            </div>
+        </div>
+
+        <h4>Documentos a enviar:</h4>
+        <div class="documentos-lista">
+            {% for poliza in polizas %}
+            <div class="documento-item">
+                <div class="documento-info">
+                    <span class="documento-numero">{{ poliza.numero_poliza or 'Sin numero' }}</span>
+                    <span class="documento-tipo">{{ poliza.tipo_seguro or 'Sin tipo' }}</span>
+                    {% if poliza.compania %}
+                    <span class="documento-compania">{{ poliza.compania.nombre }}</span>
+                    {% endif %}
+                </div>
+                <div class="documento-vigencia">
+                    {% if poliza.fecha_vigencia_hasta %}
+                    Vence: {{ poliza.fecha_vigencia_hasta.strftime('%d/%m/%Y') }}
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        {% if plantilla %}
+        <div class="plantilla-preview">
+            <h4>Mensaje a utilizar:</h4>
+            <div class="mensaje-preview">
+                <small class="text-muted">Se personalizara para cada poliza</small>
+                <pre>{{ plantilla.mensaje }}</pre>
+            </div>
+        </div>
+        {% else %}
+        <div class="alert alert-info">
+            Se usara un mensaje generico para cada poliza.
+        </div>
+        {% endif %}
+
+        <form method="POST" class="form-envio">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-actions">
+                <button type="submit" class="btn btn-success btn-lg">
+                    Enviar {{ polizas|length }} documento(s)
+                </button>
+                <a href="{{ url_for('representante.index') }}" class="btn btn-outline">Cancelar</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.cliente-info {
+    display: flex;
+    gap: 2rem;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--light);
+}
+
+.info-item label {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--gray);
+    text-transform: uppercase;
+}
+
+.documentos-lista {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin: 1rem 0 1.5rem;
+}
+
+.documento-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    background: var(--light);
+    border-radius: var(--radius-sm);
+}
+
+.documento-info {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+}
+
+.documento-numero {
+    font-weight: 600;
+    color: var(--primary);
+}
+
+.documento-tipo {
+    color: var(--gray);
+}
+
+.documento-compania {
+    background: var(--secondary);
+    color: white;
+    padding: 0.125rem 0.5rem;
+    border-radius: 3px;
+    font-size: 0.8rem;
+}
+
+.documento-vigencia {
+    font-size: 0.85rem;
+    color: var(--gray);
+}
+
+.plantilla-preview {
+    margin: 1.5rem 0;
+}
+
+.mensaje-preview {
+    background: var(--light);
+    padding: 1rem;
+    border-radius: var(--radius);
+    border-left: 3px solid var(--primary);
+}
+
+.mensaje-preview pre {
+    margin: 0.5rem 0 0;
+    white-space: pre-wrap;
+    font-family: inherit;
+    font-size: 0.9rem;
+}
+
+.form-envio {
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--light);
+}
+
+.form-actions {
+    display: flex;
+    gap: 1rem;
+}
+
+.btn-lg {
+    padding: 0.875rem 2rem;
+    font-size: 1.1rem;
+}
+</style>
+{% endblock %}

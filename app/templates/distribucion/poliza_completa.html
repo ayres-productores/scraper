@@ -27,7 +27,6 @@
 
 <div class="tabs">
     <button class="tab-btn active" data-tab="datos">Datos de la Poliza</button>
-    <button class="tab-btn" data-tab="pagos">Pagos ({{ pagos|length }})</button>
     <button class="tab-btn" data-tab="siniestros">Siniestros ({{ siniestros|length }})</button>
     <button class="tab-btn" data-tab="historial">Historial ({{ interacciones|length }})</button>
 </div>
@@ -300,61 +299,6 @@
             <a href="{{ url_for('distribucion.cliente_detalle', cliente_id=poliza.cliente.id) }}" class="btn btn-outline">Cancelar</a>
         </div>
     </form>
-</div>
-
-<!-- Tab Pagos -->
-<div class="tab-content" id="tab-pagos">
-    <div class="card">
-        <div class="card-header">
-            <h3>Pagos de la Poliza</h3>
-            <div class="btn-group">
-                <a href="{{ url_for('distribucion.nuevo_pago', poliza_id=poliza.id) }}" class="btn btn-primary btn-sm">+ Nuevo Pago</a>
-                <a href="{{ url_for('distribucion.generar_cuotas', poliza_id=poliza.id) }}" class="btn btn-outline btn-sm">Generar Cuotas</a>
-            </div>
-        </div>
-        <div class="card-body">
-            {% if pagos %}
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Cuota</th>
-                        <th>Monto</th>
-                        <th>Vencimiento</th>
-                        <th>Fecha Pago</th>
-                        <th>Estado</th>
-                        <th>Acciones</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for pago in pagos %}
-                    <tr class="{% if pago.estado == 'vencido' %}table-danger{% elif pago.estado == 'pagado' %}table-success{% endif %}">
-                        <td>{{ pago.numero_cuota or '-' }}</td>
-                        <td>${{ "%.2f"|format(pago.monto) }}</td>
-                        <td>{{ pago.fecha_vencimiento.strftime('%d/%m/%Y') }}</td>
-                        <td>{{ pago.fecha_pago.strftime('%d/%m/%Y') if pago.fecha_pago else '-' }}</td>
-                        <td>
-                            <span class="badge {% if pago.estado == 'pagado' %}badge-success{% elif pago.estado == 'vencido' %}badge-danger{% else %}badge-warning{% endif %}">
-                                {{ pago.estado|capitalize }}
-                            </span>
-                        </td>
-                        <td>
-                            {% if pago.estado in ['pendiente', 'vencido'] %}
-                            <form action="{{ url_for('distribucion.marcar_pago_pagado', pago_id=pago.id) }}" method="POST" style="display:inline;">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                <button type="submit" class="btn btn-sm btn-success">Pagado</button>
-                            </form>
-                            {% endif %}
-                            <a href="{{ url_for('distribucion.editar_pago', pago_id=pago.id) }}" class="btn btn-sm btn-outline">Editar</a>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <p class="text-muted text-center">No hay pagos registrados</p>
-            {% endif %}
-        </div>
-    </div>
 </div>
 
 <!-- Tab Siniestros -->

@@ -835,6 +835,100 @@ class Cliente(db.Model):
         # Agregar código de Argentina
         return '+54' + tel
 
+    @staticmethod
+    def normalizar_telefono_argentina(telefono):
+        """
+        Normaliza un número de teléfono argentino al formato: 54 + 9 + código área + número.
+
+        Formato final para WhatsApp Argentina: 5491112345678 (sin +, sin espacios)
+
+        Ejemplos de entrada -> salida:
+        - "+54 9 11 1234-5678" -> "5491112345678"
+        - "011 15 1234-5678" -> "5491112345678"
+        - "15 1234 5678" -> None (necesita código de área)
+        - "11 1234 5678" -> "5491112345678"
+        - "1112345678" -> "5491112345678"
+        - "5491112345678" -> "5491112345678"
+
+        Args:
+            telefono: Número de teléfono en cualquier formato
+
+        Returns:
+            tuple: (numero_normalizado, error_mensaje)
+                   Si es válido: ("5491112345678", None)
+                   Si hay error: (None, "mensaje de error")
+        """
+        if not telefono:
+            return None, "El teléfono es requerido"
+
+        # Limpiar: solo dígitos
+        digitos = ''.join(c for c in str(telefono) if c.isdigit())
+
+        if not digitos:
+            return None, "El teléfono no contiene números válidos"
+
+        # Si ya tiene formato completo 549XXXXXXXXXX (13 dígitos)
+        if digitos.startswith('549') and len(digitos) >= 12 and len(digitos) <= 14:
+            return digitos, None
+
+        # Si tiene 54 pero no 549, agregar el 9
+        if digitos.startswith('54') and not digitos.startswith('549'):
+            digitos = '549' + digitos[2:]
+            if len(digitos) >= 12 and len(digitos) <= 14:
+                return digitos, None
+
+        # Quitar prefijos locales argentinos
+        # 0XX (código de área con 0) o 15 (prefijo celular)
+        if digitos.startswith('0'):
+            digitos = digitos[1:]
+
+        # Si empieza con 15, necesitamos el código de área
+        if digitos.startswith('15'):
+            return None, "Falta el código de área. Ejemplo: 11 15 1234-5678 para Buenos Aires"
+
+        # Quitar 15 si está después del código de área
+        # Detectar código de área (2-4 dígitos) seguido de 15
+        # Códigos de 2 dígitos: 11 (CABA/GBA)
+        # Códigos de 3 dígitos: 221 (La Plata), 351 (Córdoba), etc.
+        # Códigos de 4 dígitos: 2901 (Ushuaia), etc.
+
+        numero_sin_15 = digitos
+
+        # Patrón: código de área + 15 + número
+        # Buscar 15 en posiciones 2, 3 o 4
+        for pos in [2, 3, 4]:
+            if len(digitos) > pos + 2 and digitos[pos:pos+2] == '15':
+                numero_sin_15 = digitos[:pos] + digitos[pos+2:]
+                break
+
+        digitos = numero_sin_15
+
+        # Validar longitud: código de área (2-4) + número (8) = 10-12 dígitos
+        if len(digitos) < 10:
+            return None, f"Número muy corto ({len(digitos)} dígitos). Debe incluir código de área + número"
+
+        if len(digitos) > 12:
+            return None, f"Número muy largo ({len(digitos)} dígitos). Verificar formato"
+
+        # Formato final: 549 + número
+        resultado = '549' + digitos
+
+        return resultado, None
+
+    def establecer_telefono(self, telefono):
+        """
+        Establece el teléfono normalizándolo al formato argentino.
+
+        Returns:
+            tuple: (exito: bool, mensaje: str)
+        """
+        normalizado, error = Cliente.normalizar_telefono_argentina(telefono)
+        if error:
+            return False, error
+
+        self.telefono_whatsapp = normalizado
+        return True, f"Teléfono guardado: {normalizado}"
+
     def evaluar_si_actual(self):
         """
         Evalúa si el cliente cumple criterios de 'cliente actual'.

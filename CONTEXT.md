@@ -426,9 +426,9 @@ app/representante/
 app/templates/representante/
 ├── dashboard.html           # Panel con todas las pólizas
 ├── poliza_detalle.html      # Detalle de póliza
-├── enviar_whatsapp.html     # Formulario envío
-├── registrar_pago.html      # Formulario pago
-└── enviar_resultado.html    # Resultado envío manual
+├── confirmar_envio.html     # Confirmación antes de enviar
+├── envio_confirmacion.html  # Resultado de envío masivo
+└── editar_telefono.html     # Edición de teléfono cliente
 ```
 
 **Rutas del representante:**
@@ -436,14 +436,13 @@ app/templates/representante/
 GET  /representante/                    # Dashboard con todas las pólizas
 GET  /representante/poliza/<id>         # Detalle de póliza
 GET/POST /representante/poliza/<id>/whatsapp  # Enviar WhatsApp
-GET/POST /representante/poliza/<id>/pago      # Registrar pago
 ```
 
 **Características:**
 - Ve TODAS las pólizas del sistema (no solo las propias)
 - Columnas especiales: "Descargado por", "Cuenta Gmail", "Fecha descarga"
 - Filtros avanzados: por usuario que descargó, cuenta Gmail, fechas
-- Acciones: ver detalle, enviar WhatsApp, registrar pago, descargar PDF
+- Acciones: ver detalle, enviar WhatsApp, descargar PDF
 - Estadísticas: total, activas, por vencer, vencidas, sin contactar
 
 **Archivos modificados:**
@@ -549,9 +548,9 @@ app/
     └── representante/       # NUEVO - Templates del representante
         ├── dashboard.html
         ├── poliza_detalle.html
-        ├── enviar_whatsapp.html
-        ├── registrar_pago.html
-        └── enviar_resultado.html
+        ├── confirmar_envio.html
+        ├── envio_confirmacion.html
+        └── editar_telefono.html
 ```
 
 ### Blueprints Actuales
@@ -565,3 +564,168 @@ app/
 | api | /api | APIs y webhooks |
 | representante | /representante | Vista collaborator |
 | usage_tracker | /analytics | Tracking de uso |
+
+---
+
+## Sesión 2026-03-02 - Cambios Realizados
+
+### 1. Eliminación Completa de Funcionalidad de Pagos
+
+Se eliminó toda la funcionalidad de registro y gestión de pagos del sistema (no se hacen cobranzas).
+
+**Rutas eliminadas de `distribucion/routes.py`:**
+- `GET /distribucion/poliza/<id>/pagos` - Lista de pagos
+- `GET/POST /distribucion/poliza/<id>/pagos/nuevo` - Nuevo pago
+- `GET/POST /distribucion/pago/<id>/editar` - Editar pago
+- `POST /distribucion/pago/<id>/marcar-pagado` - Marcar como pagado
+- `GET/POST /distribucion/poliza/<id>/pagos/generar` - Generar cuotas
+- `GET /distribucion/pagos/pendientes` - Pagos pendientes
+
+**Formularios eliminados de `distribucion/forms.py`:**
+- `PagoForm`
+- `GenerarCuotasForm`
+
+**Templates eliminados:**
+- `app/templates/distribucion/pagos.html`
+- `app/templates/distribucion/pago_form.html`
+- `app/templates/distribucion/pagos_pendientes.html`
+- `app/templates/distribucion/generar_cuotas.html`
+- `app/templates/representante/registrar_pago.html`
+
+**Archivos modificados:**
+- `app/templates/base.html` - Quitado enlace "Pagos Pendientes" del menú
+- `app/templates/distribucion/crm_dashboard.html` - Quitada sección y acciones de pagos
+- `app/templates/distribucion/poliza_completa.html` - Quitado tab de pagos
+- `app/representante/routes.py` - Quitada ruta `registrar_pago`
+- `app/templates/representante/dashboard.html` - Quitado botón "$"
+- `app/templates/representante/poliza_detalle.html` - Quitada sección de pagos
+
+**Nota:** El modelo `Pago` se mantiene en `models.py` para compatibilidad con datos históricos y el sistema de alertas (`tasks/alertas.py`).
+
+### 2. Edición de Teléfono con Normalización Argentina
+
+Se agregó funcionalidad para que el representante pueda editar el teléfono WhatsApp del cliente con normalización automática al formato argentino.
+
+**Archivos creados:**
+- `app/templates/representante/editar_telefono.html` - Formulario de edición
+
+**Archivos modificados:**
+- `app/models.py` - Agregados métodos en clase `Cliente`:
+  - `normalizar_telefono_argentina(telefono)` - Método estático que normaliza cualquier formato al estándar `549XXXXXXXXXX`
+  - `establecer_telefono(telefono)` - Método de instancia que valida y guarda
+- `app/representante/routes.py` - Nueva ruta `editar_telefono`
+- `app/templates/representante/poliza_detalle.html` - Botón "Editar Tel" en datos del cliente
+
+**Formato de normalización:**
+```
+Entrada                  -> Salida
++54 9 11 1234-5678      -> 5491112345678
+011 15 1234-5678        -> 5491112345678
+11 1234-5678            -> 5491112345678
+351 123-4567            -> 5493511234567
+```
+
+**Rutas actuales del representante:**
+- `GET /representante/` - Dashboard
+- `GET /representante/poliza/<id>` - Detalle
+- `GET/POST /representante/cliente/<id>/enviar` - Enviar documentos pendientes
+- `GET/POST /representante/cliente/<id>/telefono` - Editar teléfono
+
+### 3. Envío Simplificado de Documentos
+
+Se reemplazó el envío individual de pólizas por un envío masivo de documentos pendientes por cliente.
+
+**Cambios:**
+- Nueva ruta `enviar_documentos(cliente_id)` reemplaza `enviar_whatsapp(poliza_id)`
+- Envía automáticamente TODAS las pólizas del cliente que no tienen envío previo
+- Usa la plantilla predeterminada (sin editor de mensaje)
+- Flujo: Confirmar → Crear EnvioWhatsApp por cada póliza → Background processor envía
+
+**Templates nuevos:**
+- `confirmar_envio.html` - Muestra lista de documentos a enviar antes de confirmar
+- `envio_confirmacion.html` - Confirmación con documentos encolados
+
+**Templates eliminados:**
+- `enviar_whatsapp.html` (editor de mensaje individual)
+- `enviar_resultado.html` (resultado de envío individual)
+
+### 4. Integración Completa con API de WhatsApp
+
+Se corrigió y completó la integración con `whatsapp-service-standalone` para el envío real de documentos.
+
+**Problema detectado:**
+El sistema marcaba documentos como "encolados" pero no los enviaba porque caía al modo "manual" cuando no detectaba una sesión API activa.
+
+**Solución implementada:**
+El sistema verifica 2 modos de envío por API en orden de prioridad:
+1. **API Local** (`whatsapp-service-standalone` en localhost:3001) - Sesión personal
+2. **API de Meta** (WhatsApp Business Cloud API) - Cuenta business
+
+Si ninguna API está disponible, muestra enlaces wa.me para envío manual.
+
+**Archivos modificados:**
+
+`app/representante/routes.py`:
+- Importado modelo `WhatsAppSession`
+- Función `enviar_documentos` verifica sesión API activa:
+  ```python
+  sesion_web = WhatsAppSession.query.filter_by(
+      usuario_id=current_user.id,
+      estado='ready',
+      activo=True
+  ).first()
+  envio_automatico = modo_api or sesion_web is not None
+  ```
+- Dashboard recibe `sesion_whatsapp` para mostrar estado de conexión
+
+`app/templates/representante/dashboard.html`:
+- Agregado indicador de estado API en header
+- Botón "Configurar API" o "API Conectada" con LED verde/rojo
+- Enlace a `/distribucion/whatsapp/configurar` para escanear QR
+
+**Flujo de envío:**
+```
+Usuario abre /representante/
+    ↓
+Indicador muestra estado de API
+    ↓ (si desconectado)
+Click "Configurar API" → /distribucion/whatsapp/configurar
+    ↓
+Escanear QR → WhatsAppSession.estado = 'ready'
+    ↓
+Volver a /representante/ → Click "Enviar Documentos"
+    ↓
+Sistema crea EnvioWhatsApp con estado='pendiente'
+    ↓
+WhatsAppQueueProcessor (background) detecta pendientes
+    ↓
+POST localhost:3001/session/{userId}/send-document
+    ↓
+Documento enviado, EnvioWhatsApp.estado = 'enviado'
+```
+
+**whatsapp-service-standalone:**
+Servicio Node.js que expone API REST para WhatsApp:
+- Ubicación: `C:\Users\César\whatsapp-service-standalone\`
+- Puerto: 3001
+- Endpoints principales:
+  - `POST /session/:userId/start` - Iniciar sesión
+  - `GET /session/:userId/qr` - Obtener QR
+  - `GET /session/:userId/status` - Estado de sesión
+  - `POST /session/:userId/send` - Enviar texto
+  - `POST /session/:userId/send-document` - Enviar documento con caption
+
+**Para iniciar el servicio:**
+```bash
+cd C:\Users\César\whatsapp-service-standalone
+npm start  # o usar iniciar.bat
+```
+
+**Configuración del portal:**
+```python
+# config.py
+WHATSAPP_SERVICE_URL = 'http://localhost:3001'
+WHATSAPP_SERVICE_TIMEOUT = 30
+```
+
+---

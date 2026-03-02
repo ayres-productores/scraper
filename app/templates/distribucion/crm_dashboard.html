@@ -100,47 +100,6 @@
         </div>
     </div>
 
-    <!-- Pagos pendientes -->
-    <div class="card">
-        <div class="card-header">
-            <h2>Pagos Pendientes</h2>
-            <a href="{{ url_for('distribucion.pagos_pendientes_todos') }}" class="btn btn-sm btn-outline">Ver todos</a>
-        </div>
-        <div class="card-body">
-            {% if pagos_pendientes %}
-            <div class="table-responsive">
-                <table class="table table-sm">
-                    <thead>
-                        <tr>
-                            <th>Cliente</th>
-                            <th>Cuota</th>
-                            <th>Monto</th>
-                            <th>Vence</th>
-                            <th>Estado</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for pago in pagos_pendientes %}
-                        <tr class="{% if pago.estado == 'vencido' %}table-danger{% endif %}">
-                            <td>{{ pago.poliza.cliente.nombre_completo }}</td>
-                            <td>{{ pago.numero_cuota or '-' }}</td>
-                            <td>${{ "%.2f"|format(pago.monto) }}</td>
-                            <td>{{ pago.fecha_vencimiento.strftime('%d/%m/%Y') }}</td>
-                            <td>
-                                <span class="badge {% if pago.estado == 'vencido' %}badge-danger{% else %}badge-warning{% endif %}">
-                                    {{ pago.estado|capitalize }}
-                                </span>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <p class="text-muted text-center">No hay pagos pendientes</p>
-            {% endif %}
-        </div>
-    </div>
 </div>
 
 <div class="grid-2 mt-4">
@@ -228,10 +187,6 @@
             <a href="{{ url_for('distribucion.asignar_poliza_inteligente') }}" class="action-button">
                 <span class="action-icon">&#128196;</span>
                 <span class="action-text">Nueva Poliza</span>
-            </a>
-            <a href="{{ url_for('distribucion.pagos_pendientes_todos') }}" class="action-button">
-                <span class="action-icon">&#128176;</span>
-                <span class="action-text">Pagos Pendientes</span>
             </a>
             <a href="{{ url_for('distribucion.todos_siniestros') }}" class="action-button">
                 <span class="action-icon">&#128680;</span>

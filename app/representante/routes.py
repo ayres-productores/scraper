@@ -15,10 +15,9 @@ from app import db
 from app.representante import representante_bp
 from app.models import (
     PolizaCliente, Cliente, ArchivoDescargado, Escaneo, Compania,
-    EnvioWhatsApp, PlantillaMensaje, LogActividad, Pago, Usuario
+    EnvioWhatsApp, PlantillaMensaje, LogActividad, Usuario, WhatsAppSession
 )
 from app.utils.decoradores import collaborator_requerido
-from app.distribucion.forms import EnvioForm, PagoForm
 from app.distribucion.whatsapp_sender import WhatsAppSender
 
 
@@ -137,6 +136,9 @@ def index():
     tipos_seguro = db.session.query(PolizaCliente.tipo_seguro).distinct().all()
     tipos_seguro = [t[0] for t in tipos_seguro if t[0]]
 
+    # Estado de sesión WhatsApp del usuario actual
+    sesion_whatsapp = WhatsAppSession.query.filter_by(usuario_id=current_user.id).first()
+
     return render_template('representante/dashboard.html',
                            polizas=polizas,
                            paginacion=paginacion,
@@ -145,6 +147,7 @@ def index():
                            usuarios=usuarios,
                            cuentas=cuentas,
                            tipos_seguro=tipos_seguro,
+                           sesion_whatsapp=sesion_whatsapp,
                            filtros={
                                'q': busqueda,
                                'compania': compania_id,
@@ -174,133 +177,145 @@ def poliza_detalle(poliza_id):
         EnvioWhatsApp.fecha_envio.desc()
     ).all()
 
-    # Obtener pagos
-    pagos = Pago.query.filter_by(poliza_cliente_id=poliza_id).order_by(
-        Pago.numero_cuota
-    ).all()
-
     return render_template('representante/poliza_detalle.html',
                            poliza=poliza,
-                           envios=envios,
-                           pagos=pagos)
+                           envios=envios)
 
 
-@representante_bp.route('/poliza/<int:poliza_id>/whatsapp', methods=['GET', 'POST'])
+@representante_bp.route('/cliente/<int:cliente_id>/enviar', methods=['GET', 'POST'])
 @login_required
 @collaborator_requerido
-def enviar_whatsapp(poliza_id):
-    """Enviar póliza por WhatsApp."""
-    poliza = PolizaCliente.query.options(
-        joinedload(PolizaCliente.cliente)
-    ).get_or_404(poliza_id)
+def enviar_documentos(cliente_id):
+    """Enviar todos los documentos pendientes del cliente por WhatsApp."""
+    cliente = Cliente.query.get_or_404(cliente_id)
 
-    cliente = poliza.cliente
-    form = EnvioForm()
+    # Verificar que el cliente tenga teléfono
+    if not cliente.telefono_whatsapp:
+        flash('El cliente no tiene teléfono de WhatsApp configurado.', 'danger')
+        return redirect(url_for('representante.index'))
 
-    # Obtener mensaje predeterminado
-    if cliente.usar_mensaje_estandar:
-        plantilla = PlantillaMensaje.obtener_predeterminada(current_user.id)
-        if plantilla:
-            mensaje_default = plantilla.renderizar(cliente, poliza)
-        else:
-            mensaje_default = f"Hola {cliente.nombre}, este es un envío de tu póliza número {poliza.numero_poliza or ''} de la compañía {poliza.obtener_nombre_compania() or ''}. Saludos!"
-    else:
-        mensaje_default = cliente.mensaje_personalizado or ''
-        plantilla_temp = PlantillaMensaje(mensaje=mensaje_default)
-        mensaje_default = plantilla_temp.renderizar(cliente, poliza)
+    # Obtener pólizas del cliente que NO tienen envío previo
+    polizas_con_envio = db.session.query(EnvioWhatsApp.poliza_cliente_id).filter(
+        EnvioWhatsApp.poliza_cliente_id.isnot(None)
+    ).distinct()
 
-    if not form.mensaje.data:
-        form.mensaje.data = mensaje_default
-
-    if form.validate_on_submit():
-        envio = EnvioWhatsApp(
-            cliente_id=cliente.id,
-            poliza_cliente_id=poliza.id,
-            archivo_id=poliza.archivo_id,
-            mensaje_enviado=form.mensaje.data,
-            estado='pendiente'
-        )
-        db.session.add(envio)
-        db.session.commit()
-
-        LogActividad.registrar(
-            current_user.id, 'envio_whatsapp_representante',
-            f'Póliza {poliza.numero_poliza} encolada para envío a {cliente.nombre_completo}',
-            request
-        )
-
-        sender = WhatsAppSender(current_app.config)
-        if sender.modo == 'api' and sender.api_key:
-            flash(f'Mensaje encolado para envío a {cliente.nombre_completo}.', 'success')
-            return redirect(url_for('representante.poliza_detalle', poliza_id=poliza.id))
-        else:
-            enlace = sender.generar_enlace_manual(
-                cliente.telefono_formateado,
-                form.mensaje.data
-            )
-            flash('Usa el enlace para enviar manualmente por WhatsApp.', 'info')
-            return render_template('representante/enviar_resultado.html',
-                                   enlace=enlace,
-                                   cliente=cliente,
-                                   poliza=poliza,
-                                   envio=envio)
-
-    return render_template('representante/enviar_whatsapp.html',
-                           form=form,
-                           cliente=cliente,
-                           poliza=poliza)
-
-
-@representante_bp.route('/poliza/<int:poliza_id>/pago', methods=['GET', 'POST'])
-@login_required
-@collaborator_requerido
-def registrar_pago(poliza_id):
-    """Registrar un pago de la póliza."""
-    poliza = PolizaCliente.query.options(
-        joinedload(PolizaCliente.cliente)
-    ).get_or_404(poliza_id)
-
-    form = PagoForm()
-
-    # Obtener siguiente número de cuota
-    ultimo_pago = Pago.query.filter_by(poliza_cliente_id=poliza_id).order_by(
-        Pago.numero_cuota.desc()
-    ).first()
-    siguiente_cuota = (ultimo_pago.numero_cuota + 1) if ultimo_pago else 1
-
-    if not form.numero_cuota.data:
-        form.numero_cuota.data = siguiente_cuota
-
-    if form.validate_on_submit():
-        pago = Pago(
-            poliza_cliente_id=poliza.id,
-            numero_cuota=form.numero_cuota.data,
-            monto=form.monto.data,
-            fecha_vencimiento=form.fecha_vencimiento.data,
-            fecha_pago=form.fecha_pago.data,
-            estado='pagado' if form.fecha_pago.data else 'pendiente',
-            medio_pago=form.medio_pago.data,
-            comprobante=form.comprobante.data,
-            notas=form.notas.data
-        )
-        db.session.add(pago)
-        db.session.commit()
-
-        LogActividad.registrar(
-            current_user.id, 'pago_registrado_representante',
-            f'Pago cuota {pago.numero_cuota} de póliza {poliza.numero_poliza}',
-            request
-        )
-
-        flash(f'Pago de cuota {pago.numero_cuota} registrado correctamente.', 'success')
-        return redirect(url_for('representante.poliza_detalle', poliza_id=poliza.id))
-
-    # Obtener pagos existentes
-    pagos = Pago.query.filter_by(poliza_cliente_id=poliza_id).order_by(
-        Pago.numero_cuota
+    polizas_pendientes = PolizaCliente.query.filter(
+        PolizaCliente.cliente_id == cliente_id,
+        PolizaCliente.archivo_id.isnot(None),  # Solo las que tienen PDF
+        ~PolizaCliente.id.in_(polizas_con_envio)
     ).all()
 
-    return render_template('representante/registrar_pago.html',
-                           form=form,
-                           poliza=poliza,
-                           pagos=pagos)
+    if not polizas_pendientes:
+        flash('No hay documentos pendientes de envío para este cliente.', 'info')
+        return redirect(url_for('representante.index'))
+
+    # Obtener plantilla predeterminada
+    plantilla = PlantillaMensaje.obtener_predeterminada(current_user.id)
+
+    # Verificar modo de envío antes de procesar
+    sender = WhatsAppSender(current_app.config)
+    modo_api = sender.modo == 'api' and sender.api_key
+
+    # Verificar si hay sesión de WhatsApp Web activa
+    sesion_web = WhatsAppSession.query.filter_by(
+        usuario_id=current_user.id,
+        estado='ready',
+        activo=True
+    ).first()
+
+    # Modo automático si hay API o sesión web activa
+    envio_automatico = modo_api or sesion_web is not None
+
+    if request.method == 'POST':
+        envios_creados = []
+
+        for poliza in polizas_pendientes:
+            # Generar mensaje para esta póliza
+            if plantilla:
+                mensaje = plantilla.renderizar(cliente, poliza)
+            else:
+                mensaje = f"Hola {cliente.nombre}, te envío tu póliza {poliza.numero_poliza or ''} de {poliza.obtener_nombre_compania() or 'tu aseguradora'}. Saludos!"
+
+            item = {
+                'poliza': poliza,
+                'mensaje': mensaje
+            }
+
+            # Crear EnvioWhatsApp si hay envío automático (API o sesión web)
+            if envio_automatico:
+                envio = EnvioWhatsApp(
+                    cliente_id=cliente.id,
+                    poliza_cliente_id=poliza.id,
+                    archivo_id=poliza.archivo_id,
+                    mensaje_enviado=mensaje,
+                    estado='pendiente'
+                )
+                db.session.add(envio)
+            else:
+                # Modo manual: generar enlace wa.me
+                item['enlace_wa'] = sender.generar_enlace_manual(
+                    cliente.telefono_formateado,
+                    mensaje
+                )
+
+            envios_creados.append(item)
+
+        if envio_automatico:
+            db.session.commit()
+            metodo = 'WhatsApp Web' if sesion_web else 'API'
+            LogActividad.registrar(
+                current_user.id, 'envio_masivo_representante',
+                f'{len(envios_creados)} documento(s) encolado(s) para envío ({metodo}) a {cliente.nombre_completo}',
+                request
+            )
+
+        return render_template('representante/envio_confirmacion.html',
+                               cliente=cliente,
+                               envios=envios_creados,
+                               envio_automatico=envio_automatico,
+                               sesion_web=sesion_web)
+
+    # GET: Mostrar confirmación antes de enviar
+    return render_template('representante/confirmar_envio.html',
+                           cliente=cliente,
+                           polizas=polizas_pendientes,
+                           plantilla=plantilla)
+
+
+@representante_bp.route('/cliente/<int:cliente_id>/telefono', methods=['GET', 'POST'])
+@login_required
+@collaborator_requerido
+def editar_telefono(cliente_id):
+    """Editar teléfono de WhatsApp del cliente."""
+    cliente = Cliente.query.get_or_404(cliente_id)
+
+    # Obtener la póliza de referencia para volver
+    poliza_id = request.args.get('poliza_id', type=int)
+
+    if request.method == 'POST':
+        nuevo_telefono = request.form.get('telefono', '').strip()
+
+        if not nuevo_telefono:
+            flash('El teléfono es requerido.', 'danger')
+        else:
+            exito, mensaje = cliente.establecer_telefono(nuevo_telefono)
+
+            if exito:
+                db.session.commit()
+                LogActividad.registrar(
+                    current_user.id, 'telefono_actualizado',
+                    f'Teléfono de {cliente.nombre_completo} actualizado a {cliente.telefono_whatsapp}',
+                    request
+                )
+                flash(f'Teléfono actualizado correctamente: {cliente.telefono_whatsapp}', 'success')
+
+                if poliza_id:
+                    return redirect(url_for('representante.poliza_detalle', poliza_id=poliza_id))
+                return redirect(url_for('representante.index'))
+            else:
+                flash(f'Error: {mensaje}', 'danger')
+
+    return render_template('representante/editar_telefono.html',
+                           cliente=cliente,
+                           poliza_id=poliza_id)
+

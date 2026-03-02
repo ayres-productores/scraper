@@ -303,65 +303,6 @@ class InteraccionForm(FlaskForm):
     submit = SubmitField('Registrar Interacción')
 
 
-class PagoForm(FlaskForm):
-    """Formulario para registrar pagos."""
-
-    numero_cuota = IntegerField('Número de Cuota', validators=[Optional()])
-    monto = DecimalField('Monto', places=2, validators=[
-        DataRequired(message='El monto es requerido')
-    ])
-    fecha_vencimiento = DateField('Fecha de Vencimiento', format='%Y-%m-%d', validators=[
-        DataRequired(message='La fecha de vencimiento es requerida')
-    ])
-    fecha_pago = DateField('Fecha de Pago', format='%Y-%m-%d', validators=[Optional()])
-
-    estado = SelectField('Estado', choices=[
-        ('pendiente', 'Pendiente'),
-        ('pagado', 'Pagado'),
-        ('vencido', 'Vencido'),
-        ('anulado', 'Anulado')
-    ], default='pendiente')
-
-    metodo_pago = SelectField('Método de Pago', choices=[
-        ('', 'Seleccionar...'),
-        ('efectivo', 'Efectivo'),
-        ('transferencia', 'Transferencia Bancaria'),
-        ('tarjeta', 'Tarjeta de Crédito/Débito'),
-        ('debito_auto', 'Débito Automático'),
-        ('cheque', 'Cheque'),
-        ('otro', 'Otro')
-    ], validators=[Optional()])
-
-    comprobante = StringField('Comprobante/Referencia', validators=[Optional(), Length(max=100)])
-    notas = TextAreaField('Notas', validators=[Optional()])
-
-    submit = SubmitField('Guardar Pago')
-
-
-class GenerarCuotasForm(FlaskForm):
-    """Formulario para generar cuotas automáticamente."""
-
-    cantidad_cuotas = IntegerField('Cantidad de Cuotas', validators=[
-        DataRequired(message='Ingresa la cantidad de cuotas'),
-        NumberRange(min=1, max=24, message='Entre 1 y 24 cuotas')
-    ])
-    monto_cuota = DecimalField('Monto por Cuota', places=2, validators=[
-        DataRequired(message='El monto es requerido')
-    ])
-    fecha_primera_cuota = DateField('Fecha Primera Cuota', format='%Y-%m-%d', validators=[
-        DataRequired(message='La fecha es requerida')
-    ])
-    periodicidad = SelectField('Periodicidad', choices=[
-        ('mensual', 'Mensual'),
-        ('bimestral', 'Bimestral'),
-        ('trimestral', 'Trimestral'),
-        ('semestral', 'Semestral'),
-        ('anual', 'Anual')
-    ], default='mensual')
-
-    submit = SubmitField('Generar Cuotas')
-
-
 class SiniestroForm(FlaskForm):
     """Formulario para registrar siniestros."""
 

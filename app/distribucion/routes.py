@@ -16,14 +16,14 @@ from flask_login import login_required, current_user
 from app import db
 from app.models import (Cliente, PolizaCliente, EnvioWhatsApp, PlantillaMensaje,
                         ArchivoDescargado, Escaneo, Compania, LogActividad,
-                        Pago, Interaccion, AlertaVencimiento, Siniestro,
+                        Interaccion, AlertaVencimiento, Siniestro,
                         RegistroAnalisisPDF, CuentaGmail, Inmobiliaria,
                         NotificacionInmobiliaria, WhatsAppSession)
 from app.distribucion.forms import (ClienteForm, AsignarPolizaForm, PlantillaMensajeForm,
                                      EnvioForm, FiltroClientesForm, PolizaCompletaForm,
-                                     InteraccionForm, PagoForm, GenerarCuotasForm,
-                                     SiniestroForm, FiltroAlertasForm, InmobiliariaForm,
-                                     AsignarInmobiliariaForm, PolizaEdicionRapidaForm)
+                                     InteraccionForm, SiniestroForm, FiltroAlertasForm,
+                                     InmobiliariaForm, AsignarInmobiliariaForm,
+                                     PolizaEdicionRapidaForm)
 from app.distribucion.whatsapp_sender import WhatsAppSender
 from datetime import datetime, timedelta
 import requests
@@ -1184,12 +1184,6 @@ def crm_dashboard():
         PolizaCliente.fecha_vigencia_hasta >= date.today()
     ).order_by(PolizaCliente.fecha_vigencia_hasta).all()
 
-    # Pagos pendientes
-    pagos_pendientes = Pago.query.join(PolizaCliente).join(Cliente).filter(
-        Cliente.usuario_id == current_user.id,
-        Pago.estado.in_(['pendiente', 'vencido'])
-    ).order_by(Pago.fecha_vencimiento).limit(10).all()
-
     # Alertas pendientes
     alertas_pendientes = AlertaVencimiento.query.filter(
         AlertaVencimiento.usuario_id == current_user.id,
@@ -1220,7 +1214,6 @@ def crm_dashboard():
                           total_clientes=total_clientes,
                           total_polizas=total_polizas,
                           polizas_por_vencer=polizas_por_vencer,
-                          pagos_pendientes=pagos_pendientes,
                           alertas_pendientes=alertas_pendientes,
                           seguimientos=seguimientos,
                           siniestros_activos=siniestros_activos,
@@ -1510,15 +1503,13 @@ def poliza_completa(poliza_id):
         beneficiarios = poliza.obtener_beneficiarios_lista()
         form.beneficiarios_texto.data = '\n'.join([f"{b.get('nombre', '')} - {b.get('porcentaje', '')}" for b in beneficiarios])
 
-    # Obtener pagos y siniestros de esta póliza
-    pagos = poliza.pagos.order_by(Pago.fecha_vencimiento).all()
+    # Obtener siniestros e interacciones de esta póliza
     siniestros = poliza.siniestros.order_by(Siniestro.fecha_ocurrencia.desc()).all()
     interacciones = poliza.interacciones.order_by(Interaccion.fecha.desc()).limit(10).all()
 
     return render_template('distribucion/poliza_completa.html',
                           form=form,
                           poliza=poliza,
-                          pagos=pagos,
                           siniestros=siniestros,
                           interacciones=interacciones)
 
@@ -1567,203 +1558,6 @@ def poliza_edicion_rapida(poliza_id):
     return render_template('distribucion/poliza_edicion_rapida.html',
                           form=form,
                           poliza=poliza)
-
-
-# ============================================================================
-# CRM - PAGOS
-# ============================================================================
-
-@distribucion_bp.route('/poliza/<int:poliza_id>/pagos')
-@login_required
-def pagos_poliza(poliza_id):
-    """Lista de pagos de una póliza."""
-    poliza = PolizaCliente.query.join(Cliente).filter(
-        PolizaCliente.id == poliza_id,
-        Cliente.usuario_id == current_user.id
-    ).first_or_404()
-
-    pagos = poliza.pagos.order_by(Pago.numero_cuota, Pago.fecha_vencimiento).all()
-
-    # Actualizar estados automáticamente
-    for pago in pagos:
-        pago.actualizar_estado_automatico()
-    db.session.commit()
-
-    return render_template('distribucion/pagos.html',
-                          poliza=poliza,
-                          pagos=pagos)
-
-
-@distribucion_bp.route('/poliza/<int:poliza_id>/pagos/nuevo', methods=['GET', 'POST'])
-@login_required
-def nuevo_pago(poliza_id):
-    """Registrar nuevo pago."""
-    poliza = PolizaCliente.query.join(Cliente).filter(
-        PolizaCliente.id == poliza_id,
-        Cliente.usuario_id == current_user.id
-    ).first_or_404()
-
-    form = PagoForm()
-
-    if form.validate_on_submit():
-        pago = Pago(
-            poliza_cliente_id=poliza.id,
-            numero_cuota=form.numero_cuota.data,
-            monto=form.monto.data,
-            fecha_vencimiento=form.fecha_vencimiento.data,
-            fecha_pago=form.fecha_pago.data,
-            estado=form.estado.data,
-            metodo_pago=form.metodo_pago.data,
-            comprobante=form.comprobante.data,
-            notas=form.notas.data
-        )
-        db.session.add(pago)
-        db.session.commit()
-
-        flash('Pago registrado correctamente.', 'success')
-        return redirect(url_for('distribucion.pagos_poliza', poliza_id=poliza.id))
-
-    return render_template('distribucion/pago_form.html',
-                          form=form,
-                          poliza=poliza,
-                          titulo='Nuevo Pago')
-
-
-@distribucion_bp.route('/pago/<int:pago_id>/editar', methods=['GET', 'POST'])
-@login_required
-def editar_pago(pago_id):
-    """Editar pago existente."""
-    pago = Pago.query.join(PolizaCliente).join(Cliente).filter(
-        Pago.id == pago_id,
-        Cliente.usuario_id == current_user.id
-    ).first_or_404()
-
-    form = PagoForm(obj=pago)
-
-    if form.validate_on_submit():
-        pago.numero_cuota = form.numero_cuota.data
-        pago.monto = form.monto.data
-        pago.fecha_vencimiento = form.fecha_vencimiento.data
-        pago.fecha_pago = form.fecha_pago.data
-        pago.estado = form.estado.data
-        pago.metodo_pago = form.metodo_pago.data
-        pago.comprobante = form.comprobante.data
-        pago.notas = form.notas.data
-
-        db.session.commit()
-
-        flash('Pago actualizado correctamente.', 'success')
-        return redirect(url_for('distribucion.pagos_poliza', poliza_id=pago.poliza_cliente_id))
-
-    return render_template('distribucion/pago_form.html',
-                          form=form,
-                          poliza=pago.poliza,
-                          pago=pago,
-                          titulo='Editar Pago')
-
-
-@distribucion_bp.route('/pago/<int:pago_id>/marcar-pagado', methods=['POST'])
-@login_required
-def marcar_pago_pagado(pago_id):
-    """Marcar pago como pagado rápidamente."""
-    pago = Pago.query.join(PolizaCliente).join(Cliente).filter(
-        Pago.id == pago_id,
-        Cliente.usuario_id == current_user.id
-    ).first_or_404()
-
-    from datetime import date
-    pago.marcar_pagado(fecha=date.today())
-    db.session.commit()
-
-    flash('Pago marcado como pagado.', 'success')
-    return redirect(request.referrer or url_for('distribucion.pagos_poliza', poliza_id=pago.poliza_cliente_id))
-
-
-@distribucion_bp.route('/poliza/<int:poliza_id>/pagos/generar', methods=['GET', 'POST'])
-@login_required
-def generar_cuotas(poliza_id):
-    """Generar cuotas automáticamente."""
-    poliza = PolizaCliente.query.join(Cliente).filter(
-        PolizaCliente.id == poliza_id,
-        Cliente.usuario_id == current_user.id
-    ).first_or_404()
-
-    form = GenerarCuotasForm()
-
-    # Pre-llenar con datos de la póliza
-    if not form.is_submitted():
-        if poliza.cantidad_cuotas:
-            form.cantidad_cuotas.data = poliza.cantidad_cuotas
-        if poliza.prima_anual and poliza.cantidad_cuotas:
-            form.monto_cuota.data = poliza.prima_anual / poliza.cantidad_cuotas
-        if poliza.fecha_vigencia_desde:
-            form.fecha_primera_cuota.data = poliza.fecha_vigencia_desde
-
-    if form.validate_on_submit():
-        from dateutil.relativedelta import relativedelta
-
-        cantidad = form.cantidad_cuotas.data
-        monto = form.monto_cuota.data
-        fecha = form.fecha_primera_cuota.data
-        periodicidad = form.periodicidad.data
-
-        # Calcular delta según periodicidad
-        deltas = {
-            'mensual': relativedelta(months=1),
-            'bimestral': relativedelta(months=2),
-            'trimestral': relativedelta(months=3),
-            'semestral': relativedelta(months=6),
-            'anual': relativedelta(years=1)
-        }
-        delta = deltas.get(periodicidad, relativedelta(months=1))
-
-        # Crear cuotas
-        for i in range(cantidad):
-            pago = Pago(
-                poliza_cliente_id=poliza.id,
-                numero_cuota=i + 1,
-                monto=monto,
-                fecha_vencimiento=fecha,
-                estado='pendiente'
-            )
-            db.session.add(pago)
-            fecha = fecha + delta
-
-        db.session.commit()
-
-        flash(f'{cantidad} cuotas generadas correctamente.', 'success')
-        return redirect(url_for('distribucion.pagos_poliza', poliza_id=poliza.id))
-
-    return render_template('distribucion/generar_cuotas.html',
-                          form=form,
-                          poliza=poliza)
-
-
-@distribucion_bp.route('/pagos/pendientes')
-@login_required
-def pagos_pendientes_todos():
-    """Lista de todos los pagos pendientes/vencidos."""
-    estado = request.args.get('estado', '')
-
-    query = Pago.query.join(PolizaCliente).join(Cliente).filter(
-        Cliente.usuario_id == current_user.id
-    )
-
-    if estado:
-        query = query.filter(Pago.estado == estado)
-    else:
-        query = query.filter(Pago.estado.in_(['pendiente', 'vencido']))
-
-    pagos = query.order_by(Pago.fecha_vencimiento).all()
-
-    # Actualizar estados
-    for pago in pagos:
-        pago.actualizar_estado_automatico()
-    db.session.commit()
-
-    return render_template('distribucion/pagos_pendientes.html',
-                          pagos=pagos,
-                          estado_filtro=estado)
 
 
 # ============================================================================
