@@ -1,78 +1,50 @@
 {% extends "base.html" %}
-{% block title %}Envio Confirmado - Portal de Seguros{% endblock %}
+{% block title %}Resultado de Envio - Portal de Seguros{% endblock %}
 
 {% block content %}
 <div class="page-header">
     <div>
-        <h1>Envio Confirmado</h1>
+        <h1>Resultado del Envio</h1>
         <p class="text-muted">{{ cliente.nombre_completo }}</p>
     </div>
 </div>
 
 <div class="card resultado-card">
     <div class="card-body text-center">
-        <div class="resultado-icono">&#9989;</div>
-        <h2>{{ envios|length }} documento(s) encolado(s)</h2>
-
-        {% if envio_automatico %}
-        <p class="text-muted">
-            Los documentos se enviaran automaticamente en segundo plano.
-        </p>
-        <div class="alert alert-success">
-            El sistema procesara los envios automaticamente. Puedes verificar el estado en el historial de envios.
-        </div>
-
-        <div class="envios-lista">
-            {% for item in envios %}
-            <div class="envio-item">
-                <div class="envio-info">
-                    <span class="envio-poliza">{{ item.poliza.numero_poliza or 'Sin numero' }}</span>
-                    {% if item.poliza.compania %}
-                    <span class="envio-compania">{{ item.poliza.compania.nombre }}</span>
-                    {% endif %}
-                </div>
-                <span class="badge badge-warning">Pendiente</span>
-            </div>
-            {% endfor %}
-        </div>
+        {% if total_enviados == resultados|length %}
+        <div class="resultado-icono exito">&#9989;</div>
+        <h2>{{ total_enviados }} documento(s) enviado(s)</h2>
+        <p class="text-muted">Todos los documentos fueron enviados correctamente.</p>
+        {% elif total_enviados > 0 %}
+        <div class="resultado-icono parcial">&#9888;</div>
+        <h2>{{ total_enviados }}/{{ resultados|length }} documento(s) enviado(s)</h2>
+        <p class="text-muted">Algunos documentos no pudieron ser enviados.</p>
         {% else %}
-        <p class="text-muted">
-            Haz clic en cada boton para enviar por WhatsApp Web. Recuerda adjuntar el PDF manualmente.
-        </p>
+        <div class="resultado-icono error">&#10060;</div>
+        <h2>Error en el envio</h2>
+        <p class="text-muted">No se pudo enviar ningun documento.</p>
+        {% endif %}
 
-        <div class="envios-lista-manual">
-            {% for item in envios %}
-            <div class="envio-item-manual">
-                <div class="envio-header">
-                    <span class="envio-poliza">{{ item.poliza.numero_poliza or 'Sin numero' }}</span>
+        <div class="resultados-lista">
+            {% for item in resultados %}
+            <div class="resultado-item {% if item.exito %}resultado-exito{% else %}resultado-error{% endif %}">
+                <div class="resultado-info">
+                    <span class="resultado-poliza">{{ item.poliza.numero_poliza or 'Sin numero' }}</span>
                     {% if item.poliza.compania %}
-                    <span class="envio-compania">{{ item.poliza.compania.nombre }}</span>
+                    <span class="resultado-compania">{{ item.poliza.compania.nombre }}</span>
                     {% endif %}
                 </div>
-                <div class="envio-acciones">
-                    <a href="{{ item.enlace_wa }}" target="_blank" class="btn btn-success">
-                        Abrir WhatsApp
-                    </a>
-                    {% if item.poliza.archivo %}
-                    <a href="{{ url_for('main.descargar_archivo', archivo_id=item.poliza.archivo.id) }}"
-                       target="_blank" class="btn btn-outline">
-                        Descargar PDF
-                    </a>
+                <div class="resultado-estado">
+                    {% if item.exito %}
+                    <span class="badge badge-success">Enviado</span>
+                    {% else %}
+                    <span class="badge badge-danger">Error</span>
+                    <small class="error-msg">{{ item.error }}</small>
                     {% endif %}
                 </div>
             </div>
             {% endfor %}
         </div>
-
-        <div class="alert alert-info">
-            <strong>Instrucciones:</strong>
-            <ol>
-                <li>Haz clic en "Abrir WhatsApp" para abrir la conversacion</li>
-                <li>Descarga el PDF correspondiente</li>
-                <li>Adjunta el PDF en WhatsApp y envia</li>
-            </ol>
-        </div>
-        {% endif %}
 
         <div class="resultado-navegacion">
             <a href="{{ url_for('representante.index') }}" class="btn btn-primary">
@@ -95,96 +67,67 @@
     margin-bottom: 1rem;
 }
 
+.resultado-icono.exito { color: var(--success); }
+.resultado-icono.parcial { color: var(--warning); }
+.resultado-icono.error { color: var(--danger); }
+
 .resultado-card h2 {
     margin-bottom: 0.5rem;
 }
 
-.envios-lista {
+.resultados-lista {
     margin: 2rem 0;
     text-align: left;
 }
 
-.envio-item {
+.resultado-item {
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 0.75rem 1rem;
-    background: var(--light);
     border-radius: var(--radius-sm);
     margin-bottom: 0.5rem;
 }
 
-.envio-info {
+.resultado-exito {
+    background: rgba(40, 167, 69, 0.1);
+    border-left: 3px solid var(--success);
+}
+
+.resultado-error {
+    background: rgba(220, 53, 69, 0.1);
+    border-left: 3px solid var(--danger);
+}
+
+.resultado-info {
     display: flex;
     gap: 1rem;
     align-items: center;
 }
 
-.envio-poliza {
+.resultado-poliza {
     font-weight: 600;
 }
 
-.envio-compania {
+.resultado-compania {
     color: var(--gray);
     font-size: 0.9rem;
 }
 
+.resultado-estado {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.25rem;
+}
+
+.error-msg {
+    color: var(--danger);
+    font-size: 0.75rem;
+}
+
 .resultado-navegacion {
     margin-top: 2rem;
-}
-
-.alert-success {
-    background: rgba(40, 167, 69, 0.1);
-    border: 1px solid var(--success);
-    color: var(--success);
-    padding: 1rem;
-    border-radius: var(--radius);
-    margin: 1rem 0;
-}
-
-.alert-info {
-    background: rgba(23, 162, 184, 0.1);
-    border: 1px solid #17a2b8;
-    color: #0c5460;
-    padding: 1rem;
-    border-radius: var(--radius);
-    margin: 1rem 0;
-    text-align: left;
-}
-
-.alert-info ol {
-    margin: 0.5rem 0 0 1.5rem;
-    padding: 0;
-}
-
-.envios-lista-manual {
-    margin: 1.5rem 0;
-    text-align: left;
-}
-
-.envio-item-manual {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 1rem;
-    background: var(--light);
-    border-radius: var(--radius-sm);
-    margin-bottom: 0.75rem;
-}
-
-.envio-header {
-    display: flex;
-    gap: 1rem;
-    align-items: center;
-}
-
-.envio-acciones {
-    display: flex;
-    gap: 0.5rem;
-}
-
-.envio-acciones .btn {
-    white-space: nowrap;
 }
 </style>
 {% endblock %}

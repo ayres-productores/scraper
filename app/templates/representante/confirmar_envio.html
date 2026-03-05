@@ -62,6 +62,7 @@
         </div>
         {% endif %}
 
+        {% if sesion_api_activa %}
         <form method="POST" class="form-envio">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="form-actions">
@@ -71,6 +72,17 @@
                 <a href="{{ url_for('representante.index') }}" class="btn btn-outline">Cancelar</a>
             </div>
         </form>
+        {% else %}
+        <div class="alert alert-danger">
+            <strong>API no configurada.</strong> Debes conectar tu sesion de WhatsApp para poder enviar documentos.
+        </div>
+        <div class="form-actions">
+            <a href="{{ url_for('distribucion.whatsapp_configurar') }}" class="btn btn-success btn-lg">
+                Configurar API de WhatsApp
+            </a>
+            <a href="{{ url_for('representante.index') }}" class="btn btn-outline">Volver</a>
+        </div>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

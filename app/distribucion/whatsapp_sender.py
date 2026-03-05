@@ -1,6 +1,8 @@
 """
-Motor de envío de mensajes por WhatsApp en segundo plano
-Soporta WhatsApp Business API y servicios de terceros
+Motor de envío de mensajes por WhatsApp en segundo plano.
+
+Usa el servicio whatsapp-service-standalone (localhost:3001) para envío automático.
+Fallback a enlaces wa.me para envío manual cuando no hay sesión activa.
 """
 
 import urllib.parse
@@ -344,9 +346,9 @@ class WhatsAppQueueProcessor:
 
             sleep(self.intervalo_segundos)
 
-    def _enviar_via_servicio_web(self, usuario_id, telefono, mensaje, ruta_pdf=None, nombre_pdf=None):
+    def _enviar_via_api(self, usuario_id, telefono, mensaje, ruta_pdf=None, nombre_pdf=None):
         """
-        Envía un mensaje usando el servicio de WhatsApp Web (sesión personal).
+        Envía un mensaje usando el servicio API de WhatsApp (whatsapp-service-standalone).
 
         Returns:
             Tupla (éxito: bool, resultado_o_error: str)
@@ -390,23 +392,26 @@ class WhatsAppQueueProcessor:
                 return False, f"Error HTTP {response.status_code}"
 
         except requests.exceptions.ConnectionError:
-            return False, "Servicio WhatsApp Web no disponible"
+            return False, "Servicio API de WhatsApp no disponible"
         except requests.exceptions.Timeout:
             return False, "Timeout conectando al servicio"
         except Exception as e:
             return False, str(e)
 
-    def _verificar_sesion_web_activa(self, usuario_id):
-        """Verifica si el usuario tiene una sesión de WhatsApp Web activa."""
+    def _verificar_sesion_api_activa(self, usuario_id):
+        """Verifica si el usuario tiene una sesión API de WhatsApp activa."""
         from app.models import WhatsAppSession
 
-        session = WhatsAppSession.query.filter_by(
-            usuario_id=usuario_id,
-            estado='ready',
-            activo=True
-        ).first()
-
-        return session is not None
+        try:
+            with thread_session(self.app) as session:
+                wa_session = session.query(WhatsAppSession).filter_by(
+                    usuario_id=usuario_id,
+                    estado='ready',
+                    activo=True
+                ).first()
+                return wa_session is not None
+        except Exception:
+            return False
 
     def _procesar_envios_clientes(self):
         """Procesa los envíos pendientes a clientes.
@@ -477,12 +482,15 @@ class WhatsAppQueueProcessor:
                 resultado = None
                 metodo = 'manual'
 
-                # PRIORIDAD 1: Sesión personal de WhatsApp Web
-                if self._verificar_sesion_web_activa(data['usuario_id']):
-                    logger.info(f"[WhatsApp] Usando sesión personal del usuario {data['usuario_id']}")
-                    metodo = 'web'
+                # Verificar si hay sesión API activa
+                if self._verificar_sesion_api_activa(data['usuario_id']):
+                    metodo = 'api'
+                    if data['ruta_pdf']:
+                        logger.info(f"[WhatsApp-API] Enviando documento a {data['cliente_nombre']}")
+                    else:
+                        logger.info(f"[WhatsApp-API] Enviando mensaje a {data['cliente_nombre']}")
 
-                    exito, resultado = self._enviar_via_servicio_web(
+                    exito, resultado = self._enviar_via_api(
                         usuario_id=data['usuario_id'],
                         telefono=data['telefono'],
                         mensaje=data['mensaje'],
@@ -490,25 +498,11 @@ class WhatsAppQueueProcessor:
                         nombre_pdf=data['nombre_pdf']
                     )
 
-                # PRIORIDAD 2: WhatsApp Business API
-                elif sender.modo == 'api' and sender.api_key:
-                    metodo = 'api'
-                    if data['ruta_pdf']:
-                        logger.info(f"[WhatsApp-API] Enviando póliza con PDF a {data['cliente_nombre']}")
-                        exito, resultado = sender.enviar_poliza_completa(
-                            telefono=data['telefono'],
-                            ruta_pdf=data['ruta_pdf'],
-                            mensaje=data['mensaje'],
-                            nombre_archivo=data['nombre_pdf']
-                        )
-                    else:
-                        logger.info(f"[WhatsApp-API] Enviando solo texto a {data['cliente_nombre']}")
-                        exito, resultado = sender.enviar_mensaje_api(data['telefono'], data['mensaje'])
-
-                # PRIORIDAD 3: Modo manual
+                # Sin sesión API: modo manual (no se envía automáticamente)
                 else:
-                    exito = True
-                    resultado = 'manual'
+                    logger.warning(f"[WhatsApp] Sin sesión API activa para usuario {data['usuario_id']}")
+                    exito = False
+                    resultado = 'Sin sesión API activa'
 
                 # PASO 3: Actualizar estado con sesión corta
                 self._actualizar_envio_cliente(
@@ -551,13 +545,13 @@ class WhatsAppQueueProcessor:
                     if cliente:
                         cliente.ultimo_envio = datetime.utcnow()
 
-                    # Actualizar sesión WhatsApp Web si se usó
-                    if metodo == 'web' and usuario_id:
+                    # Actualizar último uso de sesión API
+                    if metodo == 'api' and usuario_id:
                         wa_session = session.query(WhatsAppSession).filter_by(usuario_id=usuario_id).first()
                         if wa_session:
                             wa_session.ultimo_uso = datetime.utcnow()
 
-                    logger.info(f"[WhatsApp-{metodo.upper()}] Enviado a {cliente_nombre}: {resultado}")
+                    logger.info(f"[WhatsApp-API] Enviado a {cliente_nombre}: {resultado}")
                 else:
                     envio.intentos = intentos + 1
                     envio.mensaje_error = f"{metodo}: {resultado}"

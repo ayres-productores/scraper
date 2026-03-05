@@ -18,7 +18,6 @@ from app.models import (
     EnvioWhatsApp, PlantillaMensaje, LogActividad, Usuario, WhatsAppSession
 )
 from app.utils.decoradores import collaborator_requerido
-from app.distribucion.whatsapp_sender import WhatsAppSender
 
 
 @representante_bp.route('/')
@@ -187,6 +186,9 @@ def poliza_detalle(poliza_id):
 @collaborator_requerido
 def enviar_documentos(cliente_id):
     """Enviar todos los documentos pendientes del cliente por WhatsApp."""
+    import requests
+    import os
+
     cliente = Cliente.query.get_or_404(cliente_id)
 
     # Verificar que el cliente tenga teléfono
@@ -212,74 +214,121 @@ def enviar_documentos(cliente_id):
     # Obtener plantilla predeterminada
     plantilla = PlantillaMensaje.obtener_predeterminada(current_user.id)
 
-    # Verificar modo de envío antes de procesar
-    sender = WhatsAppSender(current_app.config)
-    modo_api = sender.modo == 'api' and sender.api_key
-
-    # Verificar si hay sesión de WhatsApp Web activa
-    sesion_web = WhatsAppSession.query.filter_by(
+    # Verificar si hay sesión API activa
+    sesion_api = WhatsAppSession.query.filter_by(
         usuario_id=current_user.id,
         estado='ready',
         activo=True
     ).first()
 
-    # Modo automático si hay API o sesión web activa
-    envio_automatico = modo_api or sesion_web is not None
+    sesion_api_activa = sesion_api is not None
 
     if request.method == 'POST':
-        envios_creados = []
+        resultados = []
+
+        if not sesion_api_activa:
+            flash('No hay sesión API activa. Configura WhatsApp primero.', 'danger')
+            return redirect(url_for('representante.enviar_documentos', cliente_id=cliente_id))
+
+        # Configuración del servicio API
+        service_url = current_app.config.get('WHATSAPP_SERVICE_URL', 'http://localhost:3001')
+        timeout = current_app.config.get('WHATSAPP_SERVICE_TIMEOUT', 30)
+        telefono = cliente.telefono_whatsapp.replace('+', '').replace(' ', '').replace('-', '')
 
         for poliza in polizas_pendientes:
-            # Generar mensaje para esta póliza
+            # Generar mensaje
             if plantilla:
                 mensaje = plantilla.renderizar(cliente, poliza)
             else:
                 mensaje = f"Hola {cliente.nombre}, te envío tu póliza {poliza.numero_poliza or ''} de {poliza.obtener_nombre_compania() or 'tu aseguradora'}. Saludos!"
 
-            item = {
-                'poliza': poliza,
-                'mensaje': mensaje
-            }
+            # Obtener ruta del PDF
+            ruta_pdf = None
+            nombre_pdf = None
+            if poliza.archivo:
+                if poliza.ruta_pdf_backup and os.path.exists(poliza.ruta_pdf_backup):
+                    ruta_pdf = poliza.ruta_pdf_backup
+                elif poliza.archivo.ruta_archivo and os.path.exists(poliza.archivo.ruta_archivo):
+                    ruta_pdf = poliza.archivo.ruta_archivo
+                nombre_pdf = f"Poliza_{poliza.numero_poliza or poliza.id}.pdf"
 
-            # Crear EnvioWhatsApp si hay envío automático (API o sesión web)
-            if envio_automatico:
-                envio = EnvioWhatsApp(
-                    cliente_id=cliente.id,
-                    poliza_cliente_id=poliza.id,
-                    archivo_id=poliza.archivo_id,
-                    mensaje_enviado=mensaje,
-                    estado='pendiente'
-                )
-                db.session.add(envio)
-            else:
-                # Modo manual: generar enlace wa.me
-                item['enlace_wa'] = sender.generar_enlace_manual(
-                    cliente.telefono_formateado,
-                    mensaje
-                )
+            # Enviar via API
+            exito = False
+            error_msg = None
+            try:
+                if ruta_pdf:
+                    response = requests.post(
+                        f"{service_url}/session/{current_user.id}/send-document",
+                        json={
+                            'phone': telefono,
+                            'filePath': ruta_pdf,
+                            'filename': nombre_pdf,
+                            'caption': mensaje
+                        },
+                        timeout=timeout
+                    )
+                else:
+                    response = requests.post(
+                        f"{service_url}/session/{current_user.id}/send",
+                        json={'phone': telefono, 'message': mensaje},
+                        timeout=timeout
+                    )
 
-            envios_creados.append(item)
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('success'):
+                        exito = True
+                    else:
+                        error_msg = data.get('error', 'Error desconocido')
+                else:
+                    error_msg = f"Error HTTP {response.status_code}"
 
-        if envio_automatico:
-            db.session.commit()
-            metodo = 'WhatsApp Web' if sesion_web else 'API'
-            LogActividad.registrar(
-                current_user.id, 'envio_masivo_representante',
-                f'{len(envios_creados)} documento(s) encolado(s) para envío ({metodo}) a {cliente.nombre_completo}',
-                request
+            except requests.exceptions.ConnectionError:
+                error_msg = "Servicio API no disponible"
+            except requests.exceptions.Timeout:
+                error_msg = "Timeout"
+            except Exception as e:
+                error_msg = str(e)
+
+            # Registrar envío
+            envio = EnvioWhatsApp(
+                cliente_id=cliente.id,
+                poliza_cliente_id=poliza.id,
+                archivo_id=poliza.archivo_id,
+                mensaje_enviado=mensaje,
+                estado='enviado' if exito else 'error',
+                fecha_envio=datetime.utcnow() if exito else None,
+                mensaje_error=error_msg
             )
+            db.session.add(envio)
+
+            resultados.append({
+                'poliza': poliza,
+                'exito': exito,
+                'error': error_msg
+            })
+
+        db.session.commit()
+
+        # Log de actividad
+        enviados = sum(1 for r in resultados if r['exito'])
+        LogActividad.registrar(
+            current_user.id, 'envio_documentos_representante',
+            f'{enviados}/{len(resultados)} documento(s) enviado(s) a {cliente.nombre_completo}',
+            request
+        )
 
         return render_template('representante/envio_confirmacion.html',
                                cliente=cliente,
-                               envios=envios_creados,
-                               envio_automatico=envio_automatico,
-                               sesion_web=sesion_web)
+                               resultados=resultados,
+                               total_enviados=enviados)
 
     # GET: Mostrar confirmación antes de enviar
     return render_template('representante/confirmar_envio.html',
                            cliente=cliente,
                            polizas=polizas_pendientes,
-                           plantilla=plantilla)
+                           plantilla=plantilla,
+                           sesion_api_activa=sesion_api_activa)
 
 
 @representante_bp.route('/cliente/<int:cliente_id>/telefono', methods=['GET', 'POST'])
